@@ -1,0 +1,150 @@
+# CineBot - Telegram Movie Bot Admin Panel
+
+## Overview
+
+CineBot is a Telegram Mini App and Bot platform for managing and distributing movies and series content. It consists of three main parts:
+
+1. **Admin Dashboard** - Web-based management interface for movies, channels, ads, and GitHub backups
+2. **Telegram Bot** - Handles user interactions, movie delivery, search by name/cast/year, and adult content filtering
+3. **Mini App** - User-facing Netflix-like interface accessed through Telegram for browsing and watching content
+
+The platform enables administrators to manage a movie library, configure source/backup Telegram channels, run ad campaigns (including fullscreen interstitials), track user analytics, backup data to GitHub, and auto-add movies from filenames via TMDB.
+
+## Recent Features Added
+- **Netflix-like Home Screen** (`/app`): Hero slider, Latest Uploads, Top Movies, Top Series, Most Viewed sections
+- **Search Page** (`/app/search`): Real-time search with movie/series filter tabs
+- **Fullscreen Interstitial Ads**: Admin can create ads with image/video URL, ad text, button text & URL. Shows randomly on movie/series detail pages with 5-second auto-close timer
+- **Auto-Add Movie from Filename**: In Synced Files, click "Auto Add" to parse filename, fetch TMDB details, and create movie automatically. Supports formats like `Movie.Title.2025.720p.WEB-DL.mp4` and `Movie Title (2025) 1080p.mp4`
+- **Adult Shows** (`/app/adult`): 8 adult-content categories in horizontal scroll (series style), 320x50px banner ads after categories 2, 4 and 8, fullscreen ad on entry
+- **Football Live** (`/app/football`): Live match scores & streams via SportSRC API. Tabs for Live/Upcoming/Finished. Click any match to view stream.
+- **Football Admin** (`/admin/football`): Add/remove/toggle unlimited SportSRC API keys. One key is chosen randomly per API call for load balancing.
+
+## User Preferences
+
+Preferred communication style: Simple, everyday language.
+
+## System Architecture
+
+### Frontend Architecture
+- **Framework**: React 18 with TypeScript
+- **Routing**: Wouter (lightweight React router)
+- **State Management**: TanStack React Query for server state
+- **UI Components**: shadcn/ui component library built on Radix UI primitives
+- **Styling**: Tailwind CSS with custom cinema dark theme
+- **Build Tool**: Vite with HMR support
+- **Animations**: Framer Motion for smooth transitions
+
+### Backend Architecture
+- **Runtime**: Node.js with Express
+- **Language**: TypeScript with ESM modules
+- **API Design**: RESTful endpoints defined in shared/routes.ts with Zod validation
+- **Bot Integration**: node-telegram-bot-api for Telegram Bot functionality
+- **GitHub Integration**: GitHub API for automated backups
+
+### Data Storage
+- **Database**: PostgreSQL
+- **ORM**: Drizzle ORM with drizzle-zod for schema validation
+- **Schema Location**: shared/schema.ts contains all table definitions
+- **Migrations**: Drizzle Kit with `db:push` command
+
+### Database Schema
+Key tables include:
+- `movies` - Movie/series metadata with file references and genres
+- `episodes` - Series episode details
+- `channels` - Telegram source and backup channel configuration  
+- `users` - Bot user tracking
+- `ads` - Advertisement campaign management
+- `settings` - Global bot settings including bot token, TMDB API key, and GitHub configuration
+- `backups` - Backup history with status and timestamps
+- `synced_files` - Files synced from Telegram channels
+- `football_api_keys` - SportSRC API keys for football streaming (multiple supported, random rotation)
+
+### Project Structure
+```
+client/           # React frontend
+  src/
+    components/   # UI components including shadcn/ui
+    hooks/        # React Query hooks for API calls
+    pages/        # Route components (admin/*, app/*)
+    lib/          # Utilities and query client
+server/           # Express backend
+  bot.ts          # Telegram bot logic with search and menu commands
+  db.ts           # Database connection
+  routes.ts       # API route handlers
+  storage.ts      # Data access layer
+  github-backup.ts # GitHub backup functionality
+  backup-scheduler.ts # Auto-backup scheduling
+shared/           # Shared code between client/server
+  schema.ts       # Drizzle database schema including backups table
+  routes.ts       # API route definitions with Zod schemas
+```
+
+### API Structure
+Routes are defined declaratively in `shared/routes.ts` with:
+- Path templates
+- HTTP methods
+- Input validation schemas (Zod)
+- Response type definitions
+
+This enables type-safe API consumption on both client and server.
+
+## Recent Features
+
+### GitHub Backup System (NEW)
+- **Manual Backup**: One-click backup of movies, episodes, channels, and ads to GitHub
+- **Auto Backup**: Automatic daily backups (configurable in settings)
+- **Backup History**: View all backup attempts with success/failure status and timestamps
+- **GitHub Configuration**: Store GitHub personal access token and repository details securely in database
+- **Backup Location**: Files stored in `backups/` directory in your GitHub repo
+
+### Telegram Bot Enhancements (NEW)
+- **Search Command**: `/search <name/actor/year>` - Search by movie name, actor name, or release year
+- **Top Rated Menu**: `/top` or "🔥 Top Rated" button to view top movies
+- **Adult Section**: "👁️ Adult Only" menu button with premium access placeholder
+- **Menu Commands**: Bot displays search and top rated commands in Telegram menu
+
+### Movie/Series Enhancements (NEW)
+- **Genre Field**: Add genres (e.g., "Action, Drama, Comedy") when creating/editing movies
+- **File Size Display**: Shows file sizes in MB or GB (≥1GB displays as GB)
+- **Ad Rendering**: Improved ad display with support for Adsterra scripts, custom HTML, images, and videos
+
+## External Dependencies
+
+### Telegram Integration
+- **node-telegram-bot-api**: Bot polling and message handling
+- Bot token stored in database settings or `TELEGRAM_BOT_TOKEN` environment variable
+- Mini App integration via Telegram Web App API
+
+### Database
+- **PostgreSQL**: Primary database via `DATABASE_URL` environment variable
+- **Drizzle ORM**: Type-safe database operations
+
+### GitHub Integration
+- **GitHub API**: For creating backups as JSON files in GitHub repositories
+- Personal access token required (with `repo` scope)
+- Automatic daily backups available when configured
+
+### Ad Networks
+- Support for Adsterra and custom banner/redirect/native ads
+- Ad serving with impression tracking
+- Dynamic ad rendering with script execution support
+
+### Development Tools
+- Replit-specific Vite plugins for development banners and error overlays
+- ESBuild for production server bundling
+
+## Setup Instructions
+
+### GitHub Backup Setup
+1. Go to GitHub Settings → Developer settings → Personal access tokens
+2. Create a new token with `repo` scope
+3. In CineBot admin, go to GitHub Backup page
+4. Click "Configure GitHub"
+5. Paste your token, enter repository (owner/repo), and branch name
+6. Toggle "Enable Auto Backup" for daily automatic backups
+7. Click "Backup Now" to test
+
+### Bot Search Features
+- Users can search by `/search <query>` in Telegram
+- Search queries match movie titles, actor names, and release years
+- "🔍 Search Movie" button prompts for manual search input

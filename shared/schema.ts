@@ -1,0 +1,194 @@
+import { pgTable, text, serial, integer, boolean, timestamp, bigint, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+export const qualityEnum = pgEnum("quality", ["480p", "720p", "1080p", "4k"]);
+export const typeEnum = pgEnum("type", ["movie", "series"]);
+export const roleEnum = pgEnum("role", ["source", "backup"]);
+export const adTypeEnum = pgEnum("ad_type", ["adsterra", "custom_banner", "custom_redirect", "custom_native", "fullscreen"]);
+
+// Movies & Series Data
+export const movies = pgTable("movies", {
+  id: serial("id").primaryKey(),
+  fileId: text("file_id"), // Nullable for series containers
+  fileUniqueId: text("file_unique_id"), // Nullable for series containers
+  fileSize: bigint("file_size", { mode: "number" }),
+  duration: integer("duration"), // in seconds
+  caption: text("caption"),
+  quality: qualityEnum("quality").default("720p"),
+  title: text("title").notNull(),
+  type: typeEnum("type").default("movie"),
+  overview: text("overview"),
+  posterPath: text("poster_path"),
+  releaseDate: text("release_date"),
+  tmdbId: integer("tmdb_id"),
+  cast: jsonb("cast"),
+  views: integer("views").default(0),
+  rating: integer("rating").default(0),
+  genre: text("genre"),
+  originalLanguage: text("original_language"),
+  postedToChannel: boolean("posted_to_channel").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Episodes for Series
+export const episodes = pgTable("episodes", {
+  id: serial("id").primaryKey(),
+  movieId: integer("movie_id").references(() => movies.id).notNull(),
+  seasonNumber: integer("season_number").notNull(),
+  episodeNumber: integer("episode_number").notNull(),
+  title: text("title"),
+  overview: text("overview"),
+  fileId: text("file_id").notNull(),
+  fileUniqueId: text("file_unique_id").notNull(),
+  fileSize: bigint("file_size", { mode: "number" }),
+  airDate: text("air_date"),
+  rating: integer("rating").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Telegram Channels
+export const channels = pgTable("channels", {
+  id: serial("id").primaryKey(),
+  telegramId: text("telegram_id").notNull().unique(),
+  username: text("username"),
+  role: roleEnum("role").default("backup"),
+  isActive: boolean("is_active").default(true),
+  name: text("name"),
+  lastMessageId: integer("last_message_id").default(0),
+});
+
+// Synced Files from Channels
+export const syncedFiles = pgTable("synced_files", {
+  id: serial("id").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  messageId: integer("message_id").notNull(),
+  fileId: text("file_id").notNull(),
+  fileUniqueId: text("file_unique_id").notNull().unique(),
+  fileName: text("file_name").notNull(),
+  fileSize: bigint("file_size", { mode: "number" }),
+  mimeType: text("mime_type"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Users (Bot Users)
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  telegramId: text("telegram_id").notNull().unique(),
+  username: text("username"),
+  firstName: text("first_name"),
+  isAdmin: boolean("is_admin").default(false),
+  joinedAt: timestamp("joined_at").defaultNow(),
+  lastActive: timestamp("last_active").defaultNow(),
+});
+
+// Ads Configuration
+export const ads = pgTable("ads", {
+  id: serial("id").primaryKey(),
+  type: adTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  content: text("content"),
+  isActive: boolean("is_active").default(true),
+  weight: integer("weight").default(1),
+  impressionCount: integer("impression_count").default(0),
+  // Fullscreen interstitial ad fields
+  imageUrl: text("image_url"),
+  videoUrl: text("video_url"),
+  buttonText: text("button_text"),
+  buttonUrl: text("button_url"),
+  adText: text("ad_text"),
+});
+
+// System Settings (Bot Token, Admin Auth)
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  botToken: text("bot_token"),
+  tmdbApiKey: text("tmdb_api_key"),
+  adminUsername: text("admin_username").notNull().default("admin"),
+  adminPassword: text("admin_password").notNull().default("admin123"),
+  isSetup: boolean("is_setup").default(false),
+  githubToken: text("github_token"),
+  githubRepo: text("github_repo"),
+  githubBranch: text("github_branch").default("main"),
+  autoBackupEnabled: boolean("auto_backup_enabled").default(false),
+  telegramChannelUsername: text("telegram_channel_username"),
+  autoPostMovies: boolean("auto_post_movies").default(false),
+  autoPostSeries: boolean("auto_post_series").default(false),
+  autoAddMovies: boolean("auto_add_movies").default(false),
+  splashVideoPath: text("splash_video_path"),
+  splashAlwaysShow: boolean("splash_always_show").default(false),
+});
+
+// Mascot Settings
+export const mascotSettings = pgTable("mascot_settings", {
+  id: serial("id").primaryKey(),
+  enabled: boolean("enabled").default(true),
+  files: jsonb("files").$type<string[]>().default([]),
+  intervalSeconds: integer("interval_seconds").default(120),
+  showDurationSeconds: integer("show_duration_seconds").default(6),
+});
+
+// Football API Keys (SportSRC)
+export const footballApiKeys = pgTable("football_api_keys", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull(),
+  label: text("label"),
+  isActive: boolean("is_active").default(true),
+  requestCount: integer("request_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Daily View Logs for analytics
+export const viewLogs = pgTable("view_logs", {
+  id: serial("id").primaryKey(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  count: integer("count").default(1).notNull(),
+  movieId: integer("movie_id"),
+});
+
+// Backup History
+export const backups = pgTable("backups", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // 'manual' or 'auto'
+  status: text("status").notNull(), // 'success' or 'failed'
+  message: text("message"),
+  backupData: jsonb("backup_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Schemas
+export const insertMovieSchema = createInsertSchema(movies).omit({ id: true, createdAt: true, views: true, rating: true });
+export const insertEpisodeSchema = createInsertSchema(episodes).omit({ id: true, createdAt: true });
+export const insertChannelSchema = createInsertSchema(channels).omit({ id: true });
+export const insertSyncedFileSchema = createInsertSchema(syncedFiles).omit({ id: true, createdAt: true });
+export const insertUserSchema = createInsertSchema(users).omit({ id: true, joinedAt: true, lastActive: true });
+export const insertAdSchema = createInsertSchema(ads).omit({ id: true, impressionCount: true });
+export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true });
+export const insertBackupSchema = createInsertSchema(backups).omit({ id: true, createdAt: true });
+export const insertMascotSettingsSchema = createInsertSchema(mascotSettings).omit({ id: true });
+export const insertFootballApiKeySchema = createInsertSchema(footballApiKeys).omit({ id: true, createdAt: true });
+export const insertViewLogSchema = createInsertSchema(viewLogs).omit({ id: true });
+
+// Types
+export type Movie = typeof movies.$inferSelect;
+export type InsertMovie = z.infer<typeof insertMovieSchema>;
+export type Episode = typeof episodes.$inferSelect;
+export type InsertEpisode = z.infer<typeof insertEpisodeSchema>;
+export type Channel = typeof channels.$inferSelect;
+export type InsertChannel = z.infer<typeof insertChannelSchema>;
+export type SyncedFile = typeof syncedFiles.$inferSelect;
+export type InsertSyncedFile = z.infer<typeof insertSyncedFileSchema>;
+export type Ad = typeof ads.$inferSelect;
+export type InsertAd = z.infer<typeof insertAdSchema>;
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type Settings = typeof settings.$inferSelect;
+export type InsertSettings = z.infer<typeof insertSettingsSchema>;
+export type Backup = typeof backups.$inferSelect;
+export type InsertBackup = z.infer<typeof insertBackupSchema>;
+export type MascotSettings = typeof mascotSettings.$inferSelect;
+export type InsertMascotSettings = z.infer<typeof insertMascotSettingsSchema>;
+export type FootballApiKey = typeof footballApiKeys.$inferSelect;
+export type InsertFootballApiKey = z.infer<typeof insertFootballApiKeySchema>;
+export type ViewLog = typeof viewLogs.$inferSelect;
+export type InsertViewLog = z.infer<typeof insertViewLogSchema>;
