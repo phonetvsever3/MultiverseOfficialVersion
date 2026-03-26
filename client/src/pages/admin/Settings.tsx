@@ -10,8 +10,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSettingsSchema, type Settings } from "@shared/schema";
-import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw } from "lucide-react";
+import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 interface SplashConfig {
   alwaysShow: boolean;
@@ -183,6 +184,11 @@ export default function AdminSettings() {
     queryKey: ["/api/settings"] 
   });
 
+  const [packages, setPackages] = useState<{ name: string; price: string; description: string }[]>(
+    settings?.supportPackages || []
+  );
+  const [newPkg, setNewPkg] = useState({ name: "", price: "", description: "" });
+
   const form = useForm({
     resolver: zodResolver(insertSettingsSchema.partial()),
     defaultValues: {
@@ -194,6 +200,7 @@ export default function AdminSettings() {
       autoPostMovies: settings?.autoPostMovies ?? false,
       autoPostSeries: settings?.autoPostSeries ?? false,
       autoAddMovies: settings?.autoAddMovies ?? false,
+      adminTelegramUsername: settings?.adminTelegramUsername || "",
     }
   });
 
@@ -209,13 +216,15 @@ export default function AdminSettings() {
         autoPostMovies: settings.autoPostMovies ?? false,
         autoPostSeries: settings.autoPostSeries ?? false,
         autoAddMovies: settings.autoAddMovies ?? false,
+        adminTelegramUsername: settings.adminTelegramUsername || "",
       });
+      setPackages(settings.supportPackages || []);
     }
   });
 
   const mutation = useMutation({
     mutationFn: async (values: Partial<Settings>) => {
-      const res = await apiRequest("POST", "/api/settings", values);
+      const res = await apiRequest("POST", "/api/settings", { ...values, supportPackages: packages });
       return res.json();
     },
     onSuccess: () => {
@@ -378,6 +387,108 @@ export default function AdminSettings() {
                         </FormItem>
                       )}
                     />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Support & Advertising */}
+              <Card className="hover-elevate">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <MessageCircle className="h-5 w-5 text-[#0088cc]" />
+                    Support & Advertising
+                  </CardTitle>
+                  <CardDescription>
+                    Configure the admin Telegram username for support and set advertising packages.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <FormField
+                    control={form.control}
+                    name="adminTelegramUsername"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Admin Telegram Username</FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value ?? ""} placeholder="yourusername (without @)" data-testid="input-admin-telegram-username" />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">Users will be directed to this Telegram contact for support and advertising enquiries.</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Advertising Packages */}
+                  <div>
+                    <p className="text-sm font-semibold mb-3">Advertising Packages</p>
+                    <div className="space-y-2 mb-3">
+                      {packages.map((pkg, i) => (
+                        <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-muted/30 border border-border/50">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="text-sm font-bold text-foreground">{pkg.name}</span>
+                              <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-md font-semibold">{pkg.price}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate">{pkg.description}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPackages(p => p.filter((_, j) => j !== i))}
+                            className="shrink-0 w-7 h-7 rounded-lg hover:bg-destructive/10 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                            data-testid={`button-remove-package-${i}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      {packages.length === 0 && (
+                        <p className="text-xs text-muted-foreground py-2">No packages yet. Add one below.</p>
+                      )}
+                    </div>
+
+                    {/* Add new package */}
+                    <div className="p-4 rounded-xl border border-dashed border-border bg-muted/10 space-y-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Add Package</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input
+                          placeholder="Package name"
+                          value={newPkg.name}
+                          onChange={e => setNewPkg(p => ({ ...p, name: e.target.value }))}
+                          data-testid="input-new-package-name"
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Price (e.g. $50/week)"
+                          value={newPkg.price}
+                          onChange={e => setNewPkg(p => ({ ...p, price: e.target.value }))}
+                          data-testid="input-new-package-price"
+                          className="text-sm"
+                        />
+                      </div>
+                      <Textarea
+                        placeholder="Description of what's included..."
+                        value={newPkg.description}
+                        onChange={e => setNewPkg(p => ({ ...p, description: e.target.value }))}
+                        data-testid="input-new-package-description"
+                        className="text-sm min-h-[60px] resize-none"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!newPkg.name || !newPkg.price}
+                        onClick={() => {
+                          if (newPkg.name && newPkg.price) {
+                            setPackages(p => [...p, newPkg]);
+                            setNewPkg({ name: "", price: "", description: "" });
+                          }
+                        }}
+                        data-testid="button-add-package"
+                        className="w-full gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Package
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

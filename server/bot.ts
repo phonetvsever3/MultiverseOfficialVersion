@@ -70,6 +70,27 @@ export async function startBot() {
   const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
   const webAppBase = domain ? `https://${domain}` : "";
   const webAppHome = webAppBase ? `${webAppBase}/app` : "";
+
+  async function getRotatedUrl(fallbackUrl: string): Promise<string> {
+    try {
+      const cfg = await storage.getSettings();
+      if (cfg?.urlRotationEnabled) {
+        const randomUrl = await storage.getRandomActiveAppUrl();
+        if (randomUrl) {
+          await storage.incrementAppUrlVisitCount(randomUrl.id);
+          return randomUrl.url;
+        }
+      }
+    } catch {}
+    return fallbackUrl;
+  }
+
+  async function getMainKeyboard() {
+    if (!webAppHome) return FALLBACK_KEYBOARD;
+    const url = await getRotatedUrl(webAppHome);
+    return buildKeyboard(url);
+  }
+
   const MAIN_KEYBOARD = webAppHome ? buildKeyboard(webAppHome) : FALLBACK_KEYBOARD;
 
   // Handle polling errors (conflict, network issues, etc.)
@@ -135,7 +156,9 @@ export async function startBot() {
 
   async function sendMovieCard(chatId: number, movie: any) {
     const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
-    const webAppUrl = domain ? `https://${domain}/app/movie/${movie.id}` : "";
+    const baseMovieUrl = domain ? `https://${domain}/app/movie/${movie.id}` : "";
+    const rotatedBase = baseMovieUrl ? await getRotatedUrl(webAppHome) : "";
+    const webAppUrl = rotatedBase ? `${rotatedBase.replace(/\/app$/, "")}/app/movie/${movie.id}` : baseMovieUrl;
 
     const year = movie.releaseDate ? movie.releaseDate.split('-')[0] : 'N/A';
     const size = formatSize(movie.fileSize);
@@ -187,7 +210,7 @@ export async function startBot() {
 
   async function sendMovieList(chatId: number, items: any[], title: string) {
     if (items.length === 0) {
-      await botInstance?.sendMessage(chatId, `❌ No results found.`, { reply_markup: MAIN_KEYBOARD });
+      await botInstance?.sendMessage(chatId, `❌ No results found.`, { reply_markup: await getMainKeyboard() });
       return;
     }
     await botInstance?.sendMessage(chatId, `*${title}* — showing ${items.length} result(s):`, { parse_mode: 'Markdown' });
@@ -241,7 +264,7 @@ export async function startBot() {
     }
 
     await botInstance?.sendMessage(chatId, `❌ The file for ID ${id} is currently unavailable. Use the app to stream it instead.`, {
-      reply_markup: MAIN_KEYBOARD,
+      reply_markup: await getMainKeyboard(),
     });
   }
 
@@ -274,7 +297,7 @@ export async function startBot() {
           if (movie) {
             await sendMovieCard(chatId, movie);
           } else {
-            await botInstance?.sendMessage(chatId, `❌ Content not found.`, { reply_markup: MAIN_KEYBOARD });
+            await botInstance?.sendMessage(chatId, `❌ Content not found.`, { reply_markup: await getMainKeyboard() });
           }
           return;
         }
@@ -292,7 +315,7 @@ export async function startBot() {
     await botInstance?.sendMessage(
       chatId,
       `🎬 *MULTIVERSE MOVIE BOT* 🌌\n\nWelcome to Multiverse Movie Bot 🚀\nYour ultimate destination for Movies, Series, and Live Sports — all in one place!\n\n✨ *Features:*\n• 🎥 Watch latest Movies & Series\n• ⚽ Live Sports Streaming\n• 🔎 Fast Search System\n• 🌐 Open App (Mini WebView Experience)\n• ⚡ Smooth & Fast Streaming\n• 🔄 Regular Updates\n\n🔥 *Why choose Multiverse?*\n• All content organized in one universe 🌌\n• Easy to use & mobile friendly\n• High-quality streaming experience\n\n📲 Just click 🌐 *Open App* and enjoy unlimited entertainment!\n\n🚀 Powered by Multiverse System`,
-      { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD }
+      { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
     );
   });
 
@@ -305,7 +328,7 @@ export async function startBot() {
       await botInstance?.sendMessage(
         chatId,
         "🔎 *Search*\n\nType a movie or series name, actor, or genre.\n\nExamples:\n`/search Oppenheimer`\n`/search Jason Statham`\n`/search Action 2024`",
-        { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD }
+        { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
       );
       return;
     }
@@ -316,7 +339,7 @@ export async function startBot() {
     } else {
       await botInstance?.sendMessage(chatId, `❌ No results for *"${query}"*. Try a different keyword.`, {
         parse_mode: 'Markdown',
-        reply_markup: MAIN_KEYBOARD,
+        reply_markup: await getMainKeyboard(),
       });
     }
   });
@@ -327,7 +350,7 @@ export async function startBot() {
     await botInstance?.sendMessage(
       chatId,
       "🔎 *Search Movies & Series*\n\nType `/search <name>` or just type a movie name to find it!\n\nExamples:\n`/search Oppenheimer`\n`/search Action`",
-      { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD }
+      { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
     );
   });
 
@@ -409,7 +432,7 @@ export async function startBot() {
       await botInstance?.sendMessage(
         chatId,
         "🔎 *Search*\n\nJust type the movie or series name, actor, or genre and I'll find it!\n\nExamples:\n`Oppenheimer`\n`Action`\n`Jason Statham`",
-        { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD }
+        { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
       );
       return;
     }
@@ -431,7 +454,7 @@ export async function startBot() {
         } else if (text.length > 2) {
           await botInstance?.sendMessage(chatId, `❌ No results for *"${text}"*. Try a different keyword.`, {
             parse_mode: 'Markdown',
-            reply_markup: MAIN_KEYBOARD,
+            reply_markup: await getMainKeyboard(),
           });
         }
       }

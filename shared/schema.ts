@@ -97,6 +97,9 @@ export const ads = pgTable("ads", {
   buttonText: text("button_text"),
   buttonUrl: text("button_url"),
   adText: text("ad_text"),
+  // Scheduling
+  startAt: timestamp("start_at"),
+  expiresAt: timestamp("expires_at"),
 });
 
 // System Settings (Bot Token, Admin Auth)
@@ -117,6 +120,9 @@ export const settings = pgTable("settings", {
   autoAddMovies: boolean("auto_add_movies").default(false),
   splashVideoPath: text("splash_video_path"),
   splashAlwaysShow: boolean("splash_always_show").default(false),
+  urlRotationEnabled: boolean("url_rotation_enabled").default(false),
+  adminTelegramUsername: text("admin_telegram_username"),
+  supportPackages: jsonb("support_packages").$type<{ name: string; price: string; description: string }[]>().default([]),
 });
 
 // Mascot Settings
@@ -156,7 +162,20 @@ export const backups = pgTable("backups", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// App URLs for bot rotation
+export const appUrls = pgTable("app_urls", {
+  id: serial("id").primaryKey(),
+  url: text("url").notNull(),
+  label: text("label"),
+  isActive: boolean("is_active").default(true),
+  visitCount: integer("visit_count").default(0),
+  isHealthy: boolean("is_healthy"),
+  lastChecked: timestamp("last_checked"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Schemas
+export const insertAppUrlSchema = createInsertSchema(appUrls).omit({ id: true, createdAt: true, visitCount: true });
 export const insertMovieSchema = createInsertSchema(movies).omit({ id: true, createdAt: true, views: true, rating: true });
 export const insertEpisodeSchema = createInsertSchema(episodes).omit({ id: true, createdAt: true });
 export const insertChannelSchema = createInsertSchema(channels).omit({ id: true });
@@ -192,3 +211,5 @@ export type FootballApiKey = typeof footballApiKeys.$inferSelect;
 export type InsertFootballApiKey = z.infer<typeof insertFootballApiKeySchema>;
 export type ViewLog = typeof viewLogs.$inferSelect;
 export type InsertViewLog = z.infer<typeof insertViewLogSchema>;
+export type AppUrl = typeof appUrls.$inferSelect;
+export type InsertAppUrl = z.infer<typeof insertAppUrlSchema>;

@@ -11,6 +11,15 @@ CineBot is a Telegram Mini App and Bot platform for managing and distributing mo
 The platform enables administrators to manage a movie library, configure source/backup Telegram channels, run ad campaigns (including fullscreen interstitials), track user analytics, backup data to GitHub, and auto-add movies from filenames via TMDB.
 
 ## Recent Features Added
+- **Support Page** (`/app/support`): New user-facing page with "Talk to Admin" (opens Telegram chat) and "Advertising Info" section showing configurable packages. Users click a package to start a pre-filled Telegram chat with the admin.
+- **Support & Advertising Settings**: Admin Settings page now has a "Support & Advertising" card to set the admin Telegram username and add/remove advertising packages (name, price, description).
+- **Fullscreen Ad Scheduling**: Fullscreen interstitial ads now support Start Date/Time and Expire Date/Time. The `/api/ads/fullscreen` endpoint only returns ads within their active schedule window. Admin panel shows Live/Scheduled/Expired status badges.
+- **Premium Movie/Series Sections on Home**: Added "New Movies", "New Series", and "Action" as premium-styled sections with larger cards, colored gradient headers, crown badges, and separate section identities.
+- **Support Button in App Top Bar**: Headphones icon in the top bar of the home page navigates to the Support page.
+- **URL Manager** (`/admin/app-urls`): Add unlimited bot Open App URLs, enable/disable rotation (ON/OFF toggle), track visit count per URL. Bot randomly picks an active URL when rotation is ON.
+- **Users Page** (`/admin/users`): Dedicated page with total user count, admin count, and full user table separated from Overview.
+- **Database Tables Viewer** (`/admin/db-tables`): Browse all 12 database tables individually — movies, episodes, channels, users, ads, settings, backups, mascot_settings, football_api_keys, view_logs, synced_files, app_urls.
+- **Dashboard Quick Links**: Overview now shows shortcut cards to Users, URL Manager, and DB Tables instead of embedding user table inline.
 - **Netflix-like Home Screen** (`/app`): Hero slider, Latest Uploads, Top Movies, Top Series, Most Viewed sections
 - **Search Page** (`/app/search`): Real-time search with movie/series filter tabs
 - **Fullscreen Interstitial Ads**: Admin can create ads with image/video URL, ad text, button text & URL. Shows randomly on movie/series detail pages with 5-second auto-close timer

@@ -17,6 +17,8 @@ import AdminSyncedFiles from "@/pages/admin/SyncedFiles";
 import BackupPage from "@/pages/admin/Backup";
 import AdminMascot from "@/pages/admin/Mascot";
 import AdminFootball from "@/pages/admin/Football";
+import AppUrlsPage from "@/pages/admin/AppUrls";
+import UsersPage from "@/pages/admin/Users";
 import LoginPage from "@/pages/admin/Login";
 
 // Mini App Pages
@@ -26,6 +28,7 @@ import SearchPage from "@/pages/app/Search";
 import Browse from "@/pages/app/Browse";
 import Adult from "@/pages/app/Adult";
 import Football from "@/pages/app/Football";
+import Support from "@/pages/app/Support";
 
 function useAuth() {
   return useQuery({
@@ -79,6 +82,8 @@ function Router() {
       <Route path="/admin/backup">{() => <ProtectedRoute component={BackupPage} />}</Route>
       <Route path="/admin/mascot">{() => <ProtectedRoute component={AdminMascot} />}</Route>
       <Route path="/admin/football">{() => <ProtectedRoute component={AdminFootball} />}</Route>
+      <Route path="/admin/app-urls">{() => <ProtectedRoute component={AppUrlsPage} />}</Route>
+      <Route path="/admin/users">{() => <ProtectedRoute component={UsersPage} />}</Route>
 
       {/* Mini App Routes */}
       <Route path="/app" component={Home} />
@@ -87,6 +92,7 @@ function Router() {
       <Route path="/app/browse" component={Browse} />
       <Route path="/app/adult" component={Adult} />
       <Route path="/app/football" component={Football} />
+      <Route path="/app/support" component={Support} />
 
       {/* Redirect root to admin */}
       <Route path="/">{() => <ProtectedRoute component={AdminDashboard} />}</Route>

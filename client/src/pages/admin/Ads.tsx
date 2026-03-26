@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useAds, useCreateAd } from "@/hooks/use-ads";
-import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2 } from "lucide-react";
+import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2, Calendar, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -120,6 +120,8 @@ export default function AdminAds() {
       adText: "",
       buttonText: "",
       buttonUrl: "",
+      startAt: null,
+      expiresAt: null,
     }
   });
 
@@ -232,6 +234,48 @@ export default function AdminAds() {
                         <span className="text-sm font-bold text-primary">Fullscreen Interstitial Settings</span>
                       </div>
                       <p className="text-xs text-muted-foreground">This ad shows full-screen on movie/series pages with a 5-second timer before it can be closed.</p>
+
+                      {/* Schedule */}
+                      <div className="grid grid-cols-2 gap-3 p-3 bg-black/20 border border-white/5 rounded-xl">
+                        <FormField
+                          control={form.control}
+                          name="startAt"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="flex items-center gap-1.5 text-xs"><Calendar className="w-3 h-3" /> Start Date & Time</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="datetime-local"
+                                  className="text-sm"
+                                  value={field.value ? new Date(field.value as any).toISOString().slice(0, 16) : ""}
+                                  onChange={e => field.onChange(e.target.value ? new Date(e.target.value) : null)}
+                                />
+                              </FormControl>
+                              <p className="text-[10px] text-muted-foreground">Leave blank for immediate start</p>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="expiresAt"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="flex items-center gap-1.5 text-xs"><Clock className="w-3 h-3" /> Expire Date & Time</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="datetime-local"
+                                  className="text-sm"
+                                  value={field.value ? new Date(field.value as any).toISOString().slice(0, 16) : ""}
+                                  onChange={e => field.onChange(e.target.value ? new Date(e.target.value) : null)}
+                                />
+                              </FormControl>
+                              <p className="text-[10px] text-muted-foreground">Leave blank for no expiry</p>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
 
                       {/* Image Upload */}
                       <FormField
@@ -380,6 +424,29 @@ export default function AdminAds() {
                   </div>
                 </div>
                 
+                {/* Schedule info for fullscreen ads */}
+                {ad.type === 'fullscreen' && (ad.startAt || ad.expiresAt) && (() => {
+                  const now = new Date();
+                  const start = ad.startAt ? new Date(ad.startAt) : null;
+                  const expire = ad.expiresAt ? new Date(ad.expiresAt) : null;
+                  const isScheduled = start && start > now;
+                  const isExpired = expire && expire <= now;
+                  const isLive = !isScheduled && !isExpired;
+                  return (
+                    <div className="mt-3 flex items-center gap-2 text-xs p-2 rounded-lg bg-black/20 border border-white/5">
+                      <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        {start && <span className="text-muted-foreground">Start: <span className="text-foreground">{start.toLocaleString()}</span></span>}
+                        {start && expire && <span className="mx-1 text-muted-foreground">•</span>}
+                        {expire && <span className="text-muted-foreground">Expires: <span className="text-foreground">{expire.toLocaleString()}</span></span>}
+                      </div>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${isExpired ? 'bg-red-500/15 text-red-400' : isScheduled ? 'bg-yellow-500/15 text-yellow-400' : 'bg-green-500/15 text-green-400'}`}>
+                        {isExpired ? 'Expired' : isScheduled ? 'Scheduled' : 'Live'}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-border">
                    <div className="text-center">
                       <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">

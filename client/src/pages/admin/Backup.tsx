@@ -10,7 +10,7 @@ import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Cloud, Loader2, Github, Save, Clock, Database, Download, Upload, AlertTriangle, Film, Clapperboard, Tv, FileVideo, Users, Megaphone, Settings, Smile, Trophy, History } from "lucide-react";
+import { CheckCircle2, XCircle, Cloud, Loader2, Github, Save, Clock, Database, Download, Upload, AlertTriangle, Film, Clapperboard, Tv, FileVideo, Users, Megaphone, Settings, Smile, Trophy, History, BarChart2, Link2 } from "lucide-react";
 import { format } from "date-fns";
 import type { Backup } from "@shared/schema";
 
@@ -25,6 +25,8 @@ const TABLE_LABELS: { key: string; label: string; icon: any; color: string }[] =
   { key: "mascot_settings",    label: "Mascot Settings",    icon: Smile,       color: "text-pink-400" },
   { key: "football_api_keys",  label: "Football API Keys",  icon: Trophy,      color: "text-emerald-400" },
   { key: "backups",            label: "Backup History",     icon: History,     color: "text-red-400" },
+  { key: "view_logs",          label: "View Logs",          icon: BarChart2,   color: "text-indigo-400" },
+  { key: "app_urls",           label: "App URLs",           icon: Link2,       color: "text-rose-400" },
 ];
 
 export default function BackupPage() {

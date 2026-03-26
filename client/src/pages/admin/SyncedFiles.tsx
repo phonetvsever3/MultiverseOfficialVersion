@@ -167,11 +167,16 @@ export default function AdminSyncedFiles() {
       const res = await fetch(`/api/synced-files/${file.id}/auto-add-movie`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        toast({ title: data.message || "Auto-add failed", variant: "destructive" });
-      } else if (data.alreadyExists) {
-        toast({ title: `"${data.movie.title}" is already in your library` });
+        if (data.reason === "already_exists") {
+          toast({ title: "Already in library", description: "This file is already added." });
+        } else {
+          toast({ title: data.message || "Auto-add failed", variant: "destructive" });
+        }
       } else {
-        toast({ title: `✅ Added: "${data.movie.title}" from TMDB!` });
+        const label = data.type === "series" && data.episode
+          ? `${data.movie.title} S${String(data.episode.seasonNumber).padStart(2,"0")}E${String(data.episode.episodeNumber).padStart(2,"0")}`
+          : data.movie.title;
+        toast({ title: `✅ Added: "${label}" from TMDB!` });
         queryClient.invalidateQueries({ queryKey: ["/api/movies"] });
         queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
       }

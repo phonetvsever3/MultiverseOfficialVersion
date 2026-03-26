@@ -9,8 +9,9 @@ export function parseMovieFileName(fileName: string): { title: string; year?: nu
   const name = fileName.replace(/\.[^.]+$/, '');
   const normalized = name.replace(/[._]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Skip TV series episodes — any filename with SxxExx, EPxx or Episode patterns
+  // Skip TV series episodes — any filename with SxxExx, SxxEPxx, EPxx or Episode patterns
   if (
+    /\bS\d{1,2}EP\s*\d{1,3}\b/i.test(normalized) ||
     /\bS\d{1,2}[\s-]?E\d{1,3}\b/i.test(normalized) ||
     /\bEP\s*\d{1,3}\b/i.test(normalized) ||
     /\bEpisode\s*\d+\b/i.test(normalized) ||
@@ -54,16 +55,27 @@ export function parseSeriesFileName(fileName: string): {
   let matchStart = -1;
   let matchLength = 0;
 
-  // Priority 1: SxxExx / Sx Exx / Sxx-Exx (standard format)
-  const sxex = normalized.match(/\bS(\d{1,2})[\s\-]?E(\d{1,3})\b/i);
-  if (sxex && sxex.index !== undefined) {
-    season = parseInt(sxex[1]);
-    episode = parseInt(sxex[2]);
-    matchStart = sxex.index;
-    matchLength = sxex[0].length;
+  // Priority 1: SxxEPxx (e.g., S01EP03, S01EP003) — must come before SxxExx
+  const sxepx = normalized.match(/\bS(\d{1,2})EP\s*(\d{1,3})\b/i);
+  if (sxepx && sxepx.index !== undefined) {
+    season = parseInt(sxepx[1]);
+    episode = parseInt(sxepx[2]);
+    matchStart = sxepx.index;
+    matchLength = sxepx[0].length;
   }
 
-  // Priority 2: EPxx / EP xx  (no season number → Season 1)
+  // Priority 2: SxxExx / Sx Exx / Sxx-Exx (standard format)
+  if (season === undefined) {
+    const sxex = normalized.match(/\bS(\d{1,2})[\s\-]?E(\d{1,3})\b/i);
+    if (sxex && sxex.index !== undefined) {
+      season = parseInt(sxex[1]);
+      episode = parseInt(sxex[2]);
+      matchStart = sxex.index;
+      matchLength = sxex[0].length;
+    }
+  }
+
+  // Priority 3: EPxx / EP xx  (no season number → Season 1)
   if (season === undefined) {
     const epOnly = normalized.match(/\bEP\s*(\d{1,3})\b/i);
     if (epOnly && epOnly.index !== undefined) {
@@ -74,7 +86,7 @@ export function parseSeriesFileName(fileName: string): {
     }
   }
 
-  // Priority 3: Exx alone (2–3 digits, not preceded by S), e.g., "Siren's Kiss E03"
+  // Priority 4: Exx alone (2–3 digits, not preceded by S), e.g., "Siren's Kiss E03"
   if (season === undefined) {
     const eOnly = normalized.match(/(?<!\bS\d{1,2}[\s\-]?)(?<![A-Za-z])\bE(\d{2,3})\b(?!\d)/i);
     if (eOnly && eOnly.index !== undefined) {
@@ -85,7 +97,7 @@ export function parseSeriesFileName(fileName: string): {
     }
   }
 
-  // Priority 4: "Episode N" spelled out
+  // Priority 5: "Episode N" spelled out
   if (season === undefined) {
     const epSpelled = normalized.match(/\bEpisode\s+(\d{1,3})\b/i);
     if (epSpelled && epSpelled.index !== undefined) {

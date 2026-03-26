@@ -18,7 +18,7 @@ import { startBot, broadcastMovieNotification, broadcastEpisodeNotification } fr
 import { seed } from "./seed";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { movies, episodes, channels, syncedFiles, users, ads, settings, mascotSettings, footballApiKeys, backups } from "@shared/schema";
+import { movies, episodes, channels, syncedFiles, users, ads, settings, mascotSettings, footballApiKeys, backups, appUrls, viewLogs } from "@shared/schema";
 import { performBackup } from "./github-backup";
 import { initializeAutoBackup } from "./backup-scheduler";
 import multer from "multer";
@@ -28,6 +28,7 @@ import { spawn } from "child_process";
 import { getCached, setCache, invalidatePrefix, normalizeKey, TTL } from "./cache";
 import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } from "./channel";
 import { parseMovieFileName, parseSeriesFileName, autoAddFromFile, autoAddMovieFromFile } from "./auto-add";
+import { runHealthCheck } from "./url-checker";
 
 const uploadsDir = path.resolve("public/uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -296,6 +297,51 @@ export async function registerRoutes(
     }
   });
 
+  // Auto-fetch all episodes for a season from TMDB
+  app.post("/api/movies/:id/fetch-season", async (req, res) => {
+    try {
+      const movieId = Number(req.params.id);
+      const { seasonNumber } = req.body;
+      if (!seasonNumber) return res.status(400).json({ message: "seasonNumber is required" });
+
+      const movie = await storage.getMovie(movieId);
+      if (!movie || movie.type !== "series") return res.status(400).json({ message: "Invalid series" });
+      if (!movie.tmdbId) return res.status(400).json({ message: "This series has no TMDB ID set" });
+
+      const settings = await storage.getSettings();
+      if (!settings?.tmdbApiKey) return res.status(400).json({ message: "TMDB API key not configured in settings" });
+
+      const tmdbRes = await fetch(`https://api.themoviedb.org/3/tv/${movie.tmdbId}/season/${seasonNumber}?api_key=${settings.tmdbApiKey}`);
+      if (!tmdbRes.ok) return res.status(400).json({ message: "Season not found on TMDB" });
+      const seasonData = await tmdbRes.json();
+
+      const existingEpisodes = await storage.getEpisodes(movieId, seasonNumber);
+      const existingEpNums = new Set(existingEpisodes.map((e: any) => e.episodeNumber));
+
+      const created = [];
+      for (const ep of (seasonData.episodes || [])) {
+        if (existingEpNums.has(ep.episode_number)) continue;
+        const episode = await storage.createEpisode({
+          movieId,
+          seasonNumber,
+          episodeNumber: ep.episode_number,
+          title: ep.name || null,
+          overview: ep.overview || null,
+          airDate: ep.air_date || null,
+          rating: ep.vote_average ? Math.round(ep.vote_average * 10) : null,
+          fileId: "",
+          fileSize: 0,
+          fileUniqueId: `tmdb_s${seasonNumber}e${ep.episode_number}_${movieId}`,
+        });
+        created.push(episode);
+      }
+
+      res.json({ created: created.length, total: seasonData.episodes?.length || 0 });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Channels
   app.get(api.channels.list.path, async (req, res) => {
     const channels = await storage.getChannels();
@@ -331,6 +377,15 @@ export async function registerRoutes(
   app.get("/api/ads/fullscreen", async (req, res) => {
     const ad = await storage.getRandomFullscreenAd();
     res.json(ad || null);
+  });
+
+  // Public: support config (admin telegram username + packages)
+  app.get("/api/support/config", async (_req, res) => {
+    const s = await storage.getSettings();
+    res.json({
+      adminTelegramUsername: s?.adminTelegramUsername || null,
+      supportPackages: s?.supportPackages || [],
+    });
   });
 
   app.post(api.ads.impression.path, async (req, res) => {
@@ -541,7 +596,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended] = await Promise.all([
+      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action] = await Promise.all([
         storage.getMovies({ limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ type: 'movie', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ type: 'series', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
@@ -549,8 +604,11 @@ export async function registerRoutes(
         storage.getMovies({ language: 'hi', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ language: 'ko', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
+        storage.getMovies({ type: 'movie', limit: 12, offset: 0 }).then(r => r.items),
+        storage.getMovies({ type: 'series', limit: 12, offset: 0 }).then(r => r.items),
+        storage.getMovies({ search: 'action', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
       ]);
-      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended };
+      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action };
       setCache(cacheKey, result, TTL.HOME);
       res.setHeader("Cache-Control", `public, max-age=${TTL.HOME / 1000}`);
       res.json(result);
@@ -1387,6 +1445,8 @@ export async function registerRoutes(
         allMascotSettings,
         allFootballApiKeys,
         allBackups,
+        allViewLogs,
+        allAppUrls,
       ] = await Promise.all([
         db.select().from(movies),
         db.select().from(episodes),
@@ -1398,6 +1458,8 @@ export async function registerRoutes(
         db.select().from(mascotSettings),
         db.select().from(footballApiKeys),
         db.select().from(backups),
+        db.select().from(viewLogs),
+        db.select().from(appUrls),
       ]);
 
       const dump = {
@@ -1414,6 +1476,8 @@ export async function registerRoutes(
           mascotSettings: allMascotSettings,
           footballApiKeys: allFootballApiKeys,
           backups: allBackups,
+          viewLogs: allViewLogs,
+          appUrls: allAppUrls,
         },
       };
 
@@ -1439,6 +1503,8 @@ export async function registerRoutes(
     mascot_settings: mascotSettings,
     football_api_keys: footballApiKeys,
     backups,
+    view_logs: viewLogs,
+    app_urls: appUrls,
   };
 
   app.get("/api/db/export/:table", async (req, res) => {
@@ -1598,6 +1664,119 @@ export async function registerRoutes(
       }
 
       return res.status(400).json({ message: "Invalid database dump format" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── App URL Health Check (manual trigger) ────────────────────────────────
+  app.post("/api/admin/app-urls/check", requireAdmin, async (_req, res) => {
+    try {
+      await runHealthCheck();
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── App URL Rotation ─────────────────────────────────────────────────────
+  app.get("/api/admin/app-urls", requireAdmin, async (_req, res) => {
+    try {
+      const urls = await storage.getAppUrls();
+      res.json(urls);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/admin/app-urls", requireAdmin, async (req, res) => {
+    try {
+      const schema = z.object({ url: z.string().url(), label: z.string().optional(), isActive: z.boolean().optional() });
+      const data = schema.parse(req.body);
+      const created = await storage.createAppUrl(data);
+      res.json(created);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/app-urls/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const schema = z.object({ url: z.string().url().optional(), label: z.string().optional(), isActive: z.boolean().optional() });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateAppUrl(id, data);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/app-urls/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteAppUrl(id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Get the current app URL (rotated or base) — used by the bot and publicly exposed
+  app.get("/api/app-url", async (_req, res) => {
+    try {
+      const settings = await storage.getSettings();
+      const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+      const baseUrl = domain ? `https://${domain}/app` : "";
+
+      if (settings?.urlRotationEnabled) {
+        const randomUrl = await storage.getRandomActiveAppUrl();
+        if (randomUrl) {
+          await storage.incrementAppUrlVisitCount(randomUrl.id);
+          return res.json({ url: randomUrl.url, id: randomUrl.id });
+        }
+      }
+      res.json({ url: baseUrl, id: null });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Database Table Viewer ────────────────────────────────────────────────
+  app.get("/api/admin/db-tables", requireAdmin, async (_req, res) => {
+    try {
+      const [
+        moviesData, episodesData, channelsData, syncedFilesData,
+        usersData, adsData, settingsData, backupsData,
+        mascotData, footballData, viewLogsData, appUrlsData,
+      ] = await Promise.all([
+        db.select().from(movies).orderBy(desc(movies.id)).limit(200),
+        db.select().from(episodes).orderBy(desc(episodes.id)).limit(200),
+        db.select().from(channels).orderBy(desc(channels.id)).limit(200),
+        db.select().from(syncedFiles).orderBy(desc(syncedFiles.id)).limit(200),
+        db.select().from(users).orderBy(desc(users.id)).limit(200),
+        db.select().from(ads).orderBy(desc(ads.id)).limit(200),
+        db.select().from(settings).limit(1),
+        db.select().from(backups).orderBy(desc(backups.id)).limit(200),
+        db.select().from(mascotSettings).limit(1),
+        db.select().from(footballApiKeys).orderBy(desc(footballApiKeys.id)).limit(200),
+        db.select().from(viewLogs).orderBy(desc(viewLogs.id)).limit(200),
+        db.select().from(appUrls).orderBy(desc(appUrls.id)).limit(200),
+      ]);
+      res.json({
+        movies: moviesData,
+        episodes: episodesData,
+        channels: channelsData,
+        synced_files: syncedFilesData,
+        users: usersData,
+        ads: adsData,
+        settings: settingsData,
+        backups: backupsData,
+        mascot_settings: mascotData,
+        football_api_keys: footballData,
+        view_logs: viewLogsData,
+        app_urls: appUrlsData,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

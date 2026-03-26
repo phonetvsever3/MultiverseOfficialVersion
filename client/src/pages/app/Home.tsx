@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, Sparkles, History, Clapperboard } from "lucide-react";
+import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, Sparkles, History, Clapperboard, HeadphonesIcon, Crown, Zap } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
@@ -24,6 +24,9 @@ interface HomeSections {
   bollywood: Movie[];
   kdrama: Movie[];
   recommended: Movie[];
+  newMovies: Movie[];
+  newSeries: Movie[];
+  action: Movie[];
 }
 
 function getPoster(path: string | null | undefined, size = "w342") {
@@ -102,6 +105,99 @@ function Section({
       <div className="flex gap-3 overflow-x-auto px-4 pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
         {items.map((movie) => (
           <MovieCard key={movie.id} movie={movie} onClick={() => onMovieClick(movie.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PremiumCard({ movie, onClick }: { movie: Movie; onClick: () => void }) {
+  const poster = getPoster(movie.posterPath, "w500");
+  return (
+    <motion.div
+      whileTap={{ scale: 0.96 }}
+      onClick={onClick}
+      className="flex-shrink-0 w-40 cursor-pointer"
+    >
+      <div className="relative w-40 h-56 rounded-2xl overflow-hidden bg-white/5 border border-white/10 mb-2 shadow-xl">
+        {poster ? (
+          <img src={poster} alt={movie.title} className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            {movie.type === 'series' ? <AnimatedSeriesIcon /> : <AnimatedMovieIcon />}
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+        <div className="absolute top-2 left-2">
+          <div className="flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-lg px-1.5 py-0.5">
+            <Crown className="w-2.5 h-2.5 text-yellow-400" />
+            <span className="text-[8px] font-bold text-yellow-300 uppercase">{movie.type === 'series' ? 'Series' : 'Movie'}</span>
+          </div>
+        </div>
+        {movie.rating && movie.rating > 0 ? (
+          <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm rounded-lg px-1.5 py-0.5 flex items-center gap-1">
+            <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />
+            <span className="text-[9px] font-bold text-white">{(movie.rating / 10).toFixed(1)}</span>
+          </div>
+        ) : null}
+        <div className="absolute bottom-0 left-0 right-0 p-2.5">
+          {movie.quality && (
+            <span className="text-[8px] bg-primary/90 text-white rounded-md px-1.5 py-0.5 font-bold uppercase">{movie.quality}</span>
+          )}
+          <p className="text-[11px] text-white font-bold mt-1 leading-tight line-clamp-2">{movie.title}</p>
+          {movie.releaseDate && (
+            <p className="text-[9px] text-white/40 mt-0.5">{movie.releaseDate.slice(0, 4)}</p>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function PremiumSection({
+  title,
+  icon,
+  badge,
+  items,
+  onMovieClick,
+  onSeeMore,
+  accentFrom,
+  accentTo,
+  borderColor,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  badge?: string;
+  items: Movie[];
+  onMovieClick: (id: number) => void;
+  onSeeMore?: () => void;
+  accentFrom: string;
+  accentTo: string;
+  borderColor: string;
+}) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="mb-8">
+      <div className={`mx-4 mb-3 rounded-2xl bg-gradient-to-r ${accentFrom} ${accentTo} border ${borderColor} px-4 py-3 flex items-center justify-between`}>
+        <div className="flex items-center gap-2.5">
+          {icon}
+          <div>
+            <h2 className="text-sm font-black text-white uppercase tracking-wider leading-none">{title}</h2>
+            {badge && <p className="text-[9px] text-white/40 mt-0.5">{badge}</p>}
+          </div>
+        </div>
+        {onSeeMore && (
+          <button
+            onClick={onSeeMore}
+            className="flex items-center gap-1 text-[10px] text-white/60 font-bold active:scale-95 transition-all"
+          >
+            All <ChevronRight className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      <div className="flex gap-3 overflow-x-auto px-4 pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
+        {items.map((movie) => (
+          <PremiumCard key={movie.id} movie={movie} onClick={() => onMovieClick(movie.id)} />
         ))}
       </div>
     </div>
@@ -302,12 +398,22 @@ export default function Home() {
         <div>
           <h1 style={{ fontFamily: "'Orbitron', sans-serif" }} className="text-sm font-bold text-white tracking-widest uppercase">MULTIVERSE</h1>
         </div>
-        <button
-          onClick={() => setLocation('/app/search')}
-          className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center active:scale-95 transition-transform"
-        >
-          <Search className="w-4 h-4 text-white" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLocation('/app/support')}
+            data-testid="button-support"
+            className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center active:scale-95 transition-transform"
+          >
+            <HeadphonesIcon className="w-4 h-4 text-white" />
+          </button>
+          <button
+            onClick={() => setLocation('/app/search')}
+            data-testid="button-search"
+            className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center active:scale-95 transition-transform"
+          >
+            <Search className="w-4 h-4 text-white" />
+          </button>
+        </div>
       </div>
 
       <div className="pt-14">
@@ -326,6 +432,48 @@ export default function Home() {
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?sort=latest')}
             />
+
+            {/* Premium New Movies */}
+            <PremiumSection
+              title="New Movies"
+              icon={<Film className="w-5 h-5 text-blue-300" />}
+              badge="Latest movie releases"
+              accentFrom="from-blue-950/60"
+              accentTo="to-blue-900/20"
+              borderColor="border-blue-500/20"
+              items={sections?.newMovies || []}
+              onMovieClick={handleMovieClick}
+              onSeeMore={() => setLocation('/app/browse?type=movie&sort=latest')}
+            />
+
+            {/* Premium New Series */}
+            <PremiumSection
+              title="New Series"
+              icon={<Tv className="w-5 h-5 text-purple-300" />}
+              badge="Latest series releases"
+              accentFrom="from-purple-950/60"
+              accentTo="to-purple-900/20"
+              borderColor="border-purple-500/20"
+              items={sections?.newSeries || []}
+              onMovieClick={handleMovieClick}
+              onSeeMore={() => setLocation('/app/browse?type=series&sort=latest')}
+            />
+
+            {/* Action Section */}
+            {(sections?.action?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Action"
+                icon={<Zap className="w-5 h-5 text-orange-300" />}
+                badge="High-octane action hits"
+                accentFrom="from-orange-950/60"
+                accentTo="to-red-900/20"
+                borderColor="border-orange-500/20"
+                items={sections?.action || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?sort=rating')}
+              />
+            )}
+
             <Section
               title="Top Movies"
               icon={<Film className="w-4 h-4 text-blue-400" />}

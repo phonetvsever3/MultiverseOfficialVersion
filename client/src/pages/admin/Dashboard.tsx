@@ -1,11 +1,11 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { StatsCard } from "@/components/StatsCard";
 import { useDashboardStats } from "@/hooks/use-stats";
-import { useQuery } from "@tanstack/react-query";
-import { type User } from "@shared/schema";
-import { Users, Film, Eye, MonitorPlay, Calendar, BarChart2, Clock } from "lucide-react";
+import { Users, Film, Eye, MonitorPlay, BarChart2, Link2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useQuery } from "@tanstack/react-query";
 
 interface ViewStat { date: string; count: number }
 
@@ -38,15 +38,6 @@ export default function AdminDashboard() {
       return res.json();
     },
     staleTime: 1000 * 60 * 5,
-  });
-
-  const { data: users = [] } = useQuery<User[]>({
-    queryKey: ["/api/admin/users"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/users");
-      return res.json();
-    },
-    staleTime: 1000 * 60 * 2,
   });
 
   const chartData = fillGaps(rawViewStats, period === "7d" ? 7 : 30);
@@ -154,68 +145,38 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Users Table */}
-        <div className="bg-card border border-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
-              <Users className="w-5 h-5" />
+        {/* Quick Links */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link href="/admin/users">
+            <div className="bg-card border border-border rounded-2xl p-6 hover:border-primary/40 hover:bg-white/[0.02] transition-all cursor-pointer group">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500 group-hover:bg-blue-500/20 transition-colors">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-base font-bold text-foreground">Users</h3>
+                  <p className="text-sm text-muted-foreground">{stats?.totalUsers ?? 0} registered via Telegram bot</p>
+                </div>
+                <span className="text-muted-foreground text-sm">View all →</span>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-bold">Users</h3>
-              <p className="text-xs text-muted-foreground">{users.length} registered via Telegram bot</p>
-            </div>
-          </div>
+          </Link>
 
-          {users.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground text-sm">No users have started the bot yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider">
-                    <th className="text-left pb-3 pr-4 font-semibold">User</th>
-                    <th className="text-left pb-3 pr-4 font-semibold">Telegram ID</th>
-                    <th className="text-left pb-3 pr-4 font-semibold">
-                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Joined</span>
-                    </th>
-                    <th className="text-left pb-3 font-semibold">
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Last Active</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3 pr-4">
-                        <div>
-                          <p className="font-semibold text-foreground">
-                            {user.firstName || "—"}
-                            {user.isAdmin && (
-                              <span className="ml-2 text-[9px] bg-primary/15 text-primary rounded-full px-1.5 py-0.5 font-black uppercase">Admin</span>
-                            )}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{user.username ? `@${user.username}` : "No username"}</p>
-                        </div>
-                      </td>
-                      <td className="py-3 pr-4">
-                        <span className="font-mono text-xs text-muted-foreground">{user.telegramId}</span>
-                      </td>
-                      <td className="py-3 pr-4">
-                        <span className="text-xs text-muted-foreground">
-                          {user.joinedAt ? new Date(user.joinedAt).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" }) : "—"}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <span className="text-xs text-muted-foreground">
-                          {user.lastActive ? new Date(user.lastActive).toLocaleDateString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <Link href="/admin/app-urls">
+            <div className="bg-card border border-border rounded-2xl p-6 hover:border-primary/40 hover:bg-white/[0.02] transition-all cursor-pointer group">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-primary/10 rounded-xl text-primary group-hover:bg-primary/20 transition-colors">
+                  <Link2 className="w-6 h-6" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-base font-bold text-foreground">URL Manager</h3>
+                  <p className="text-sm text-muted-foreground">Manage bot open app URLs &amp; rotation</p>
+                </div>
+                <span className="text-muted-foreground text-sm">Manage →</span>
+              </div>
             </div>
-          )}
+          </Link>
+
         </div>
       </main>
     </div>

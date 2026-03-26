@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import { initUrlChecker } from "./url-checker";
 
 const SessionStore = MemoryStore(session);
 
@@ -99,6 +100,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  initUrlChecker();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs,
+  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs, appUrls,
   type Movie, type InsertMovie,
   type Episode, type InsertEpisode,
   type Channel, type SyncedFile, type InsertSyncedFile,
@@ -10,6 +10,7 @@ import {
   type Backup, type InsertBackup,
   type MascotSettings,
   type FootballApiKey, type InsertFootballApiKey,
+  type AppUrl, type InsertAppUrl,
 } from "@shared/schema";
 import { eq, desc, sql, like, and, gte, inArray } from "drizzle-orm";
 
@@ -91,6 +92,14 @@ export interface IStorage {
   updateFootballApiKey(id: number, updates: Partial<InsertFootballApiKey>): Promise<FootballApiKey>;
   deleteFootballApiKey(id: number): Promise<void>;
   incrementFootballApiKeyRequestCount(id: number): Promise<void>;
+
+  // App URLs
+  getAppUrls(): Promise<AppUrl[]>;
+  createAppUrl(url: InsertAppUrl): Promise<AppUrl>;
+  updateAppUrl(id: number, updates: Partial<InsertAppUrl>): Promise<AppUrl>;
+  deleteAppUrl(id: number): Promise<void>;
+  incrementAppUrlVisitCount(id: number): Promise<void>;
+  getRandomActiveAppUrl(): Promise<AppUrl | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -357,10 +366,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRandomFullscreenAd(): Promise<Ad | undefined> {
-    const activeAds = await db.select().from(ads)
+    const now = new Date();
+    const allActive = await db.select().from(ads)
       .where(and(eq(ads.isActive, true), eq(ads.type, 'fullscreen')));
-    if (activeAds.length === 0) return undefined;
-    return activeAds[Math.floor(Math.random() * activeAds.length)];
+    // Filter by schedule: startAt <= now and (expiresAt is null OR expiresAt > now)
+    const eligible = allActive.filter(ad => {
+      if (ad.startAt && ad.startAt > now) return false;
+      if (ad.expiresAt && ad.expiresAt <= now) return false;
+      return true;
+    });
+    if (eligible.length === 0) return undefined;
+    return eligible[Math.floor(Math.random() * eligible.length)];
   }
 
   async incrementAdImpressions(id: number): Promise<void> {
@@ -485,6 +501,36 @@ export class DatabaseStorage implements IStorage {
     await db.update(footballApiKeys)
       .set({ requestCount: sql`request_count + 1` })
       .where(eq(footballApiKeys.id, id));
+  }
+
+  async getAppUrls(): Promise<AppUrl[]> {
+    return await db.select().from(appUrls).orderBy(desc(appUrls.createdAt));
+  }
+
+  async createAppUrl(url: InsertAppUrl): Promise<AppUrl> {
+    const [created] = await db.insert(appUrls).values(url).returning();
+    return created;
+  }
+
+  async updateAppUrl(id: number, updates: Partial<InsertAppUrl>): Promise<AppUrl> {
+    const [updated] = await db.update(appUrls).set(updates).where(eq(appUrls.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAppUrl(id: number): Promise<void> {
+    await db.delete(appUrls).where(eq(appUrls.id, id));
+  }
+
+  async incrementAppUrlVisitCount(id: number): Promise<void> {
+    await db.update(appUrls)
+      .set({ visitCount: sql`visit_count + 1` })
+      .where(eq(appUrls.id, id));
+  }
+
+  async getRandomActiveAppUrl(): Promise<AppUrl | undefined> {
+    const active = await db.select().from(appUrls).where(eq(appUrls.isActive, true));
+    if (active.length === 0) return undefined;
+    return active[Math.floor(Math.random() * active.length)];
   }
 }
 

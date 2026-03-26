@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useMovies, useDeleteMovie, useCreateMovie, useUpdateMovie } from "@/hooks/use-movies";
-import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send } from "lucide-react";
+import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -21,7 +21,20 @@ function EpisodeManager({ movieId, tmdbId }: { movieId: number, tmdbId?: number 
   const [isAdding, setIsAdding] = useState(false);
   const [editingEp, setEditingEp] = useState<Episode | null>(null);
   const [notifyingEpId, setNotifyingEpId] = useState<number | null>(null);
+  const [fetchSeasonNum, setFetchSeasonNum] = useState(1);
   const { toast } = useToast();
+
+  const fetchFromTmdb = useMutation({
+    mutationFn: async (seasonNumber: number) => {
+      const res = await apiRequest("POST", `/api/movies/${movieId}/fetch-season`, { seasonNumber });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/movies/${movieId}/episodes`] });
+      toast({ title: `Season fetched from TMDB`, description: `${data.created} new episode${data.created !== 1 ? "s" : ""} added out of ${data.total} total.` });
+    },
+    onError: (e: any) => toast({ title: "Fetch failed", description: e.message, variant: "destructive" }),
+  });
 
   const handleNotifyEpisode = async (ep: Episode) => {
     setNotifyingEpId(ep.id);
@@ -112,13 +125,38 @@ function EpisodeManager({ movieId, tmdbId }: { movieId: number, tmdbId?: number 
 
   return (
     <div className="mt-4 border-t border-border pt-4">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
         <h3 className="text-sm font-bold flex items-center gap-2">
           <Tv className="w-4 h-4 text-primary" /> Episodes ({(episodes || []).length})
         </h3>
-        <Button size="sm" variant="outline" onClick={() => { setIsAdding(!isAdding); setEditingEp(null); }}>
-          {isAdding ? "Cancel" : <><PlusCircle className="w-3 h-3 mr-1" /> Add Episode</>}
-        </Button>
+        <div className="flex items-center gap-2">
+          {tmdbId && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Season</span>
+              <input
+                type="number"
+                min={1}
+                value={fetchSeasonNum}
+                onChange={e => setFetchSeasonNum(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-14 h-7 text-xs bg-background border border-border rounded-lg px-2 text-center focus:outline-none focus:ring-1 focus:ring-primary/50"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1 text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
+                onClick={() => fetchFromTmdb.mutate(fetchSeasonNum)}
+                disabled={fetchFromTmdb.isPending}
+                title="Auto-fetch all episodes from TMDB for this season"
+              >
+                {fetchFromTmdb.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                {fetchFromTmdb.isPending ? "Fetching..." : "Fetch from TMDB"}
+              </Button>
+            </div>
+          )}
+          <Button size="sm" variant="outline" onClick={() => { setIsAdding(!isAdding); setEditingEp(null); }}>
+            {isAdding ? "Cancel" : <><PlusCircle className="w-3 h-3 mr-1" /> Add Episode</>}
+          </Button>
+        </div>
       </div>
 
       {isAdding && (
