@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ChevronLeft, Film, Tv, Star, Search } from "lucide-react";
+import { ChevronLeft, Film, Star, Search } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
 
@@ -20,10 +20,20 @@ function getParams() {
   return {
     type: params.get("type") || "",
     sort: params.get("sort") || "rating",
+    lang: params.get("lang") || "",
+    search: params.get("search") || "",
+    title: params.get("title") || "",
   };
 }
 
-function getTitle(type: string, sort: string) {
+function getTitle(type: string, sort: string, lang: string, search: string, customTitle: string) {
+  if (customTitle) return customTitle;
+  if (search === "animation") return "Animation";
+  if (search === "action") return "Action";
+  if (lang === "ko") return "K-Drama";
+  if (lang === "hi") return "Bollywood";
+  if (sort === "latest" && type === "movie") return "New Movies";
+  if (sort === "latest" && type === "series") return "New Series";
   if (sort === "latest") return "Latest Uploads";
   if (sort === "views") return "Most Viewed";
   if (type === "movie") return "Top Movies";
@@ -33,16 +43,18 @@ function getTitle(type: string, sort: string) {
 
 export default function Browse() {
   const [, setLocation] = useLocation();
-  const { type, sort } = getParams();
+  const { type, sort, lang, search, title } = getParams();
   const [page, setPage] = useState(1);
   const [allItems, setAllItems] = useState<Movie[]>([]);
 
   const { data, isLoading, isFetching } = useQuery<{ items: Movie[]; total: number }>({
-    queryKey: [`/api/browse`, type, sort, page],
+    queryKey: [`/api/browse`, type, sort, lang, search, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (type) params.set("type", type);
       if (sort) params.set("sort", sort);
+      if (lang) params.set("lang", lang);
+      if (search) params.set("search", search);
       params.set("page", String(page));
       const res = await fetch(`/api/browse?${params}`);
       return res.json();
@@ -59,7 +71,7 @@ export default function Browse() {
     }
   }, [data, page]);
 
-  const title = getTitle(type, sort);
+  const pageTitle = getTitle(type, sort, lang, search, title);
   const hasMore = data ? allItems.length < data.total : false;
 
   return (
@@ -67,13 +79,15 @@ export default function Browse() {
       {/* Header */}
       <div className="fixed top-0 left-0 right-0 z-50 flex items-center gap-3 px-4 py-4 bg-gradient-to-b from-black to-transparent">
         <button
+          data-testid="button-back"
           onClick={() => setLocation("/app")}
           className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center active:scale-95 transition-transform"
         >
           <ChevronLeft className="w-5 h-5 text-white" />
         </button>
-        <h1 className="text-base font-black text-white tracking-tight">{title}</h1>
+        <h1 className="text-base font-black text-white tracking-tight">{pageTitle}</h1>
         <button
+          data-testid="button-search"
           onClick={() => setLocation("/app/search")}
           className="ml-auto w-9 h-9 rounded-full bg-white/10 flex items-center justify-center active:scale-95 transition-transform"
         >
@@ -97,6 +111,7 @@ export default function Browse() {
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setLocation(`/app/movie/${movie.id}`)}
                     className="cursor-pointer"
+                    data-testid={`card-movie-${movie.id}`}
                   >
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 border border-white/5 mb-1.5 shadow-lg">
                       {poster ? (
@@ -137,6 +152,7 @@ export default function Browse() {
 
             {hasMore && (
               <button
+                data-testid="button-load-more"
                 onClick={() => setPage(p => p + 1)}
                 disabled={isFetching}
                 className="w-full mt-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 text-sm font-bold hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50"

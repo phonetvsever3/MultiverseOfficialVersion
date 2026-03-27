@@ -9,7 +9,7 @@ import { AdRenderer } from "@/components/AdRenderer";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { type Episode, type Ad } from "@shared/schema";
+import { type Episode, type Ad, type Movie } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { fullscreenAdShownFor } from "@/lib/ad-session";
 import { addToWatchHistory } from "@/lib/watch-history";
@@ -48,6 +48,20 @@ export default function MovieView() {
     queryKey: [`/api/movies/${movieId}/trailer`],
     enabled: !!movie && !!movie.tmdbId,
   });
+
+  const { data: recommendedData } = useQuery<{ items: Movie[]; total: number }>({
+    queryKey: [`/api/browse`, movie?.type, "rating", "", "", 1],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (movie?.type) params.set("type", movie.type);
+      params.set("sort", "rating");
+      params.set("page", "1");
+      const res = await fetch(`/api/browse?${params}`);
+      return res.json();
+    },
+    enabled: !!movie,
+  });
+  const recommendedMovies = (recommendedData?.items || []).filter(m => m.id !== movieId).slice(0, 10);
 
   useEffect(() => {
     const loadAds = async () => {
@@ -545,6 +559,60 @@ export default function MovieView() {
               <div className="font-black text-sm text-white/60">Cloud</div>
            </div>
         </div>
+
+        {/* Recommended For You */}
+        {recommendedMovies.length > 0 && (
+          <div className="w-full mt-10">
+            <div className="flex items-center justify-between px-4 mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+                <span className="text-sm font-black text-white uppercase tracking-wider">You May Also Like</span>
+              </div>
+              <button
+                onClick={() => setLocation(`/app/browse?type=${movie.type}&sort=rating&title=Recommended`)}
+                className="flex items-center gap-1 text-[10px] text-primary font-bold active:scale-95 transition-all"
+              >
+                All <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: 'none' }}>
+              {recommendedMovies.map((rec) => {
+                const recPoster = rec.posterPath
+                  ? rec.posterPath.startsWith('http') ? rec.posterPath : `https://image.tmdb.org/t/p/w342${rec.posterPath}`
+                  : null;
+                return (
+                  <button
+                    key={rec.id}
+                    onClick={() => setLocation(`/app/movie/${rec.id}`)}
+                    className="flex-shrink-0 w-24 text-left"
+                    data-testid={`card-recommended-${rec.id}`}
+                  >
+                    <div className="relative w-24 h-36 rounded-xl overflow-hidden bg-white/5 border border-white/5 mb-1.5">
+                      {recPoster ? (
+                        <img src={recPoster} alt={rec.title} className="w-full h-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          {rec.type === 'series' ? <Tv className="w-6 h-6 text-white/20" /> : <Film className="w-6 h-6 text-white/20" />}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                      {rec.rating && rec.rating > 0 && (
+                        <div className="absolute top-1 right-1 bg-black/70 rounded px-1 py-0.5 flex items-center gap-0.5">
+                          <Star className="w-2 h-2 text-yellow-400 fill-yellow-400" />
+                          <span className="text-[8px] font-bold text-white">{(rec.rating / 10).toFixed(1)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-white/70 font-semibold truncate leading-tight">{rec.title}</p>
+                    {rec.releaseDate && (
+                      <p className="text-[8px] text-white/30">{rec.releaseDate.slice(0, 4)}</p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Back to all movies button */}
         <div className="w-full max-w-sm mt-8 px-4">

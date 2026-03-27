@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, Sparkles, History, Clapperboard, HeadphonesIcon, Crown, Zap } from "lucide-react";
+import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
@@ -27,6 +27,7 @@ interface HomeSections {
   newMovies: Movie[];
   newSeries: Movie[];
   action: Movie[];
+  animation: Movie[];
 }
 
 function getPoster(path: string | null | undefined, size = "w342") {
@@ -425,15 +426,20 @@ export default function Home() {
           <>
             <HeroSlider items={featuredItems} onMovieClick={handleMovieClick} />
 
-            <Section
+            {/* Latest Uploads */}
+            <PremiumSection
               title="Latest Uploads"
-              icon={<Flame className="w-4 h-4 text-orange-400" />}
+              icon={<Flame className="w-5 h-5 text-orange-300" />}
+              badge="Freshly added content"
+              accentFrom="from-orange-950/60"
+              accentTo="to-amber-900/20"
+              borderColor="border-orange-500/20"
               items={sections?.latest || []}
               onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?sort=latest')}
+              onSeeMore={() => setLocation('/app/browse?sort=latest&title=Latest+Uploads')}
             />
 
-            {/* Premium New Movies */}
+            {/* New Movies */}
             <PremiumSection
               title="New Movies"
               icon={<Film className="w-5 h-5 text-blue-300" />}
@@ -443,10 +449,10 @@ export default function Home() {
               borderColor="border-blue-500/20"
               items={sections?.newMovies || []}
               onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?type=movie&sort=latest')}
+              onSeeMore={() => setLocation('/app/browse?type=movie&sort=latest&title=New+Movies')}
             />
 
-            {/* Premium New Series */}
+            {/* New Series */}
             <PremiumSection
               title="New Series"
               icon={<Tv className="w-5 h-5 text-purple-300" />}
@@ -456,10 +462,10 @@ export default function Home() {
               borderColor="border-purple-500/20"
               items={sections?.newSeries || []}
               onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?type=series&sort=latest')}
+              onSeeMore={() => setLocation('/app/browse?type=series&sort=latest&title=New+Series')}
             />
 
-            {/* Action Section */}
+            {/* Action */}
             {(sections?.action?.length ?? 0) > 0 && (
               <PremiumSection
                 title="Action"
@@ -470,72 +476,105 @@ export default function Home() {
                 borderColor="border-orange-500/20"
                 items={sections?.action || []}
                 onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?sort=rating')}
+                onSeeMore={() => setLocation('/app/browse?search=action&sort=rating&title=Action')}
               />
             )}
 
-            <Section
-              title="Top Movies"
-              icon={<Film className="w-4 h-4 text-blue-400" />}
-              items={sections?.topMovies || []}
-              onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?type=movie&sort=rating')}
-            />
-            <Section
-              title="Top Series"
-              icon={<Tv className="w-4 h-4 text-purple-400" />}
-              items={sections?.topSeries || []}
-              onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?type=series&sort=rating')}
-            />
-            <Section
-              title="Most Viewed"
-              icon={<Eye className="w-4 h-4 text-green-400" />}
-              items={sections?.bestView || []}
-              onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?sort=views')}
-            />
-
-            {/* Watch History */}
-            {watchHistoryMovies.length > 0 && (
-              <Section
-                title="Continue Watching"
-                icon={<History className="w-4 h-4 text-cyan-400" />}
-                items={watchHistoryMovies}
+            {/* Animation */}
+            {(sections?.animation?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Animation"
+                icon={<Wand2 className="w-5 h-5 text-sky-300" />}
+                badge="Animated movies & series"
+                accentFrom="from-sky-950/60"
+                accentTo="to-cyan-900/20"
+                borderColor="border-sky-500/20"
+                items={sections?.animation || []}
                 onMovieClick={handleMovieClick}
-              />
-            )}
-
-            {/* Recommended */}
-            {(sections?.recommended?.length ?? 0) > 0 && (
-              <Section
-                title="Recommended For You"
-                icon={<Sparkles className="w-4 h-4 text-yellow-400" />}
-                items={sections?.recommended || []}
-                onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?sort=rating')}
-              />
-            )}
-
-            {/* Bollywood */}
-            {(sections?.bollywood?.length ?? 0) > 0 && (
-              <Section
-                title="Bollywood"
-                icon={<Clapperboard className="w-4 h-4 text-amber-500" />}
-                items={sections?.bollywood || []}
-                onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?lang=hi')}
+                onSeeMore={() => setLocation('/app/browse?search=animation&sort=rating&title=Animation')}
               />
             )}
 
             {/* K-Drama */}
             {(sections?.kdrama?.length ?? 0) > 0 && (
-              <Section
+              <PremiumSection
                 title="K-Drama"
-                icon={<Tv className="w-4 h-4 text-rose-400" />}
+                icon={<Heart className="w-5 h-5 text-rose-300" />}
+                badge="Best Korean dramas"
+                accentFrom="from-rose-950/60"
+                accentTo="to-pink-900/20"
+                borderColor="border-rose-500/20"
                 items={sections?.kdrama || []}
                 onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?lang=ko')}
+                onSeeMore={() => setLocation('/app/browse?lang=ko&sort=rating&title=K-Drama')}
+              />
+            )}
+
+            {/* Bollywood */}
+            {(sections?.bollywood?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Bollywood"
+                icon={<Music className="w-5 h-5 text-amber-300" />}
+                badge="Top Bollywood hits"
+                accentFrom="from-amber-950/60"
+                accentTo="to-yellow-900/20"
+                borderColor="border-amber-500/20"
+                items={sections?.bollywood || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?lang=hi&sort=rating&title=Bollywood')}
+              />
+            )}
+
+            {/* Top Movies */}
+            <PremiumSection
+              title="Top Movies"
+              icon={<Film className="w-5 h-5 text-blue-300" />}
+              badge="Highest rated movies"
+              accentFrom="from-blue-950/60"
+              accentTo="to-indigo-900/20"
+              borderColor="border-blue-500/20"
+              items={sections?.topMovies || []}
+              onMovieClick={handleMovieClick}
+              onSeeMore={() => setLocation('/app/browse?type=movie&sort=rating&title=Top+Movies')}
+            />
+
+            {/* Top Series */}
+            <PremiumSection
+              title="Top Series"
+              icon={<Tv className="w-5 h-5 text-purple-300" />}
+              badge="Highest rated series"
+              accentFrom="from-purple-950/60"
+              accentTo="to-violet-900/20"
+              borderColor="border-purple-500/20"
+              items={sections?.topSeries || []}
+              onMovieClick={handleMovieClick}
+              onSeeMore={() => setLocation('/app/browse?type=series&sort=rating&title=Top+Series')}
+            />
+
+            {/* Most Viewed */}
+            <PremiumSection
+              title="Most Viewed"
+              icon={<Eye className="w-5 h-5 text-green-300" />}
+              badge="Most popular right now"
+              accentFrom="from-green-950/60"
+              accentTo="to-emerald-900/20"
+              borderColor="border-green-500/20"
+              items={sections?.bestView || []}
+              onMovieClick={handleMovieClick}
+              onSeeMore={() => setLocation('/app/browse?sort=views&title=Most+Viewed')}
+            />
+
+            {/* Continue Watching */}
+            {watchHistoryMovies.length > 0 && (
+              <PremiumSection
+                title="Continue Watching"
+                icon={<History className="w-5 h-5 text-cyan-300" />}
+                badge="Pick up where you left off"
+                accentFrom="from-cyan-950/60"
+                accentTo="to-teal-900/20"
+                borderColor="border-cyan-500/20"
+                items={watchHistoryMovies}
+                onMovieClick={handleMovieClick}
               />
             )}
 

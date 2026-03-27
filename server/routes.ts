@@ -24,6 +24,7 @@ import { initializeAutoBackup } from "./backup-scheduler";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { spawn } from "child_process";
 import { getCached, setCache, invalidatePrefix, normalizeKey, TTL } from "./cache";
 import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } from "./channel";
@@ -430,6 +431,114 @@ export async function registerRoutes(
     res.json(data);
   });
 
+  // Admin: live server stats
+  let _prevCpu: { idle: number; total: number } | null = null;
+  function getCpuTick() {
+    const cpus = os.cpus();
+    let idle = 0, total = 0;
+    for (const cpu of cpus) {
+      for (const v of Object.values(cpu.times)) idle += (cpu.times as any).idle, total += v;
+      idle -= (cpu.times as any).idle; // undo extra idle add
+      idle += cpu.times.idle;         // add idle once
+    }
+    return { idle: idle / cpus.length, total: total / cpus.length };
+  }
+  app.get("/api/admin/server-stats", async (_req, res) => {
+    const cur = getCpuTick();
+    let cpuPercent = 0;
+    if (_prevCpu) {
+      const idleDiff = cur.idle - _prevCpu.idle;
+      const totalDiff = cur.total - _prevCpu.total;
+      cpuPercent = totalDiff > 0 ? Math.round(100 - (100 * idleDiff / totalDiff)) : 0;
+      cpuPercent = Math.max(0, Math.min(100, cpuPercent));
+    }
+    _prevCpu = cur;
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const mem = process.memoryUsage();
+    res.json({
+      cpu: cpuPercent,
+      cpuCores: os.cpus().length,
+      ramUsed: Math.round(usedMem / 1024 / 1024),
+      ramTotal: Math.round(totalMem / 1024 / 1024),
+      ramPercent: Math.round((usedMem / totalMem) * 100),
+      heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+      rss: Math.round(mem.rss / 1024 / 1024),
+      uptime: Math.round(os.uptime()),
+      processUptime: Math.round(process.uptime()),
+      platform: os.platform(),
+      hostname: os.hostname(),
+      loadAvg: os.loadavg().map(v => Math.round(v * 100) / 100),
+    });
+  });
+
+  // Admin: episode gap checker — find series with missing/un-uploaded episodes
+  app.get("/api/admin/episode-gaps", async (_req, res) => {
+    try {
+      // Get all episodes grouped by movie
+      const allEps = await db.select().from(episodes).orderBy(episodes.movieId, episodes.seasonNumber, episodes.episodeNumber);
+      const allSeries = await db.select({ id: movies.id, title: movies.title, posterPath: movies.posterPath, tmdbId: movies.tmdbId })
+        .from(movies).where(sql`type = 'series'`);
+
+      const seriesMap = new Map(allSeries.map(s => [s.id, s]));
+      const epsByMovie = new Map<number, typeof allEps>();
+      for (const ep of allEps) {
+        if (!epsByMovie.has(ep.movieId)) epsByMovie.set(ep.movieId, []);
+        epsByMovie.get(ep.movieId)!.push(ep);
+      }
+
+      const result = [];
+      for (const [movieId, eps] of epsByMovie) {
+        const series = seriesMap.get(movieId);
+        if (!series) continue;
+
+        // Group by season
+        const seasonMap = new Map<number, { uploaded: number[]; noFile: number[] }>();
+        for (const ep of eps) {
+          if (!seasonMap.has(ep.seasonNumber)) seasonMap.set(ep.seasonNumber, { uploaded: [], noFile: [] });
+          const s = seasonMap.get(ep.seasonNumber)!;
+          const hasFile = ep.fileId && ep.fileId.trim() !== '' && !(ep.fileUniqueId || '').startsWith('tmdb_');
+          if (hasFile) s.uploaded.push(ep.episodeNumber);
+          else s.noFile.push(ep.episodeNumber);
+        }
+
+        const seasons = [];
+        let totalMissing = 0;
+        for (const [sNum, data] of seasonMap) {
+          const uploaded = data.uploaded.sort((a, b) => a - b);
+          const noFile = data.noFile.sort((a, b) => a - b);
+          const allNums = [...uploaded, ...noFile].sort((a, b) => a - b);
+          const maxEp = allNums.length ? allNums[allNums.length - 1] : 0;
+          const inDb = new Set(allNums);
+          const gapsInRange = maxEp > 0
+            ? Array.from({ length: maxEp }, (_, i) => i + 1).filter(n => !inDb.has(n))
+            : [];
+          const missing = [...noFile, ...gapsInRange].sort((a, b) => a - b);
+          totalMissing += missing.length;
+          seasons.push({ season: sNum, uploaded, noFile, gapsInRange, missing, total: maxEp });
+        }
+
+        if (totalMissing > 0) {
+          result.push({
+            id: movieId,
+            title: series.title,
+            posterPath: series.posterPath,
+            tmdbId: series.tmdbId,
+            seasons: seasons.sort((a, b) => a.season - b.season),
+            totalMissing,
+          });
+        }
+      }
+
+      result.sort((a, b) => b.totalMissing - a.totalMissing);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Admin: users list with detail
   app.get("/api/admin/users", async (req, res) => {
     const allUsers = await storage.getUsers();
@@ -596,7 +705,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action] = await Promise.all([
+      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation] = await Promise.all([
         storage.getMovies({ limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ type: 'movie', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ type: 'series', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
@@ -607,8 +716,9 @@ export async function registerRoutes(
         storage.getMovies({ type: 'movie', limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ type: 'series', limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ search: 'action', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
+        storage.getMovies({ search: 'animation', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
       ]);
-      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action };
+      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation };
       setCache(cacheKey, result, TTL.HOME);
       res.setHeader("Cache-Control", `public, max-age=${TTL.HOME / 1000}`);
       res.json(result);
@@ -1192,9 +1302,11 @@ export async function registerRoutes(
     try {
       const type = (req.query.type as string) || "";
       const sort = (req.query.sort as string) || "rating";
+      const lang = (req.query.lang as string) || "";
+      const search = (req.query.search as string) || "";
       const page = Number(req.query.page) || 1;
       const limit = 20;
-      const cacheKey = `browse:${type}:${sort}:p${page}`;
+      const cacheKey = `browse:${type}:${sort}:${lang}:${search}:p${page}`;
       const hit = getCached(cacheKey);
       if (hit) {
         console.log(`[Cache] CACHE HIT → ${cacheKey}`);
@@ -1202,7 +1314,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const result = await storage.getMovies({ type, sort, limit, offset: (page - 1) * limit });
+      const result = await storage.getMovies({ type, sort, language: lang || undefined, search: search || undefined, limit, offset: (page - 1) * limit });
       setCache(cacheKey, result, TTL.BROWSE);
       res.setHeader("Cache-Control", `public, max-age=${TTL.BROWSE / 1000}`);
       res.json(result);
