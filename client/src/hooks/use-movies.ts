@@ -4,7 +4,7 @@ import { type InsertMovie } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 // GET /api/movies
-export function useMovies(filters?: { search?: string; type?: 'movie' | 'series'; page?: number; limit?: number }) {
+export function useMovies(filters?: { search?: string; type?: 'movie' | 'series'; page?: number; limit?: number; status?: string; missingEpisodes?: boolean }) {
   return useQuery({
     queryKey: [api.movies.list.path, filters],
     queryFn: async () => {
@@ -13,6 +13,8 @@ export function useMovies(filters?: { search?: string; type?: 'movie' | 'series'
       if (filters?.type) params.append("type", filters.type);
       if (filters?.page) params.append("page", filters.page.toString());
       if (filters?.limit) params.append("limit", filters.limit.toString());
+      if (filters?.status) params.append("status", filters.status);
+      if (filters?.missingEpisodes) params.append("missingEpisodes", "true");
 
       const url = `${api.movies.list.path}?${params.toString()}`;
       const res = await fetch(url);

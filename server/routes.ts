@@ -106,21 +106,51 @@ export async function registerRoutes(
     const offset = (page - 1) * limit;
     const type = (req.query.type as string) || "";
     const search = normalizeKey((req.query.search as string) || "");
+    const status = (req.query.status as string) || "";
+    const missingEpisodes = req.query.missingEpisodes === "true";
     const ttl = type === "series" ? TTL.SERIES : TTL.MOVIES;
-    const cacheKey = `movies:${type}:${search}:p${page}:l${limit}`;
+    const cacheKey = `movies:${type}:${search}:${status}:${missingEpisodes}:p${page}:l${limit}`;
 
-    const hit = getCached(cacheKey);
-    if (hit) {
-      console.log(`[Cache] CACHE HIT → ${cacheKey}`);
-      res.setHeader("Cache-Control", `public, max-age=${ttl / 1000}`);
-      return res.json(hit);
+    // Skip cache for admin-specific filters
+    if (!status && !missingEpisodes) {
+      const hit = getCached(cacheKey);
+      if (hit) {
+        console.log(`[Cache] CACHE HIT → ${cacheKey}`);
+        res.setHeader("Cache-Control", `public, max-age=${ttl / 1000}`);
+        return res.json(hit);
+      }
     }
 
     console.log(`[Cache] FETCH API → ${cacheKey}`);
-    const result = await storage.getMovies({ search: req.query.search as string, type, limit, offset });
-    setCache(cacheKey, result, ttl);
-    res.setHeader("Cache-Control", `public, max-age=${ttl / 1000}`);
+    const result = await storage.getMovies({
+      search: req.query.search as string,
+      type,
+      limit,
+      offset,
+      ...(status ? { status } : {}),
+      ...(missingEpisodes ? { missingEpisodes: true } : {}),
+    });
+    if (!status && !missingEpisodes) {
+      setCache(cacheKey, result, ttl);
+      res.setHeader("Cache-Control", `public, max-age=${ttl / 1000}`);
+    }
     res.json(result);
+  });
+
+  // Toggle series ongoing/completed status
+  app.patch("/api/admin/movies/:id/status", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { status } = req.body;
+      if (!["ongoing", "completed"].includes(status)) {
+        return res.status(400).json({ message: "status must be 'ongoing' or 'completed'" });
+      }
+      const updated = await storage.updateMovie(id, { status } as any);
+      invalidatePrefix("movies:");
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   app.get(api.movies.get.path, async (req, res) => {
@@ -477,9 +507,11 @@ export async function registerRoutes(
   // Admin: episode gap checker — find series with missing/un-uploaded episodes
   app.get("/api/admin/episode-gaps", async (_req, res) => {
     try {
+      const today = new Date().toISOString().slice(0, 10);
+
       // Get all episodes grouped by movie
       const allEps = await db.select().from(episodes).orderBy(episodes.movieId, episodes.seasonNumber, episodes.episodeNumber);
-      const allSeries = await db.select({ id: movies.id, title: movies.title, posterPath: movies.posterPath, tmdbId: movies.tmdbId })
+      const allSeries = await db.select({ id: movies.id, title: movies.title, posterPath: movies.posterPath, tmdbId: movies.tmdbId, status: movies.status })
         .from(movies).where(sql`type = 'series'`);
 
       const seriesMap = new Map(allSeries.map(s => [s.id, s]));
@@ -495,13 +527,31 @@ export async function registerRoutes(
         if (!series) continue;
 
         // Group by season
-        const seasonMap = new Map<number, { uploaded: number[]; noFile: number[] }>();
+        const seasonMap = new Map<number, {
+          uploaded: number[];
+          noFile: number[];        // has metadata, no file, but aired
+          upcoming: number[];      // has metadata, no file, NOT yet aired
+          gapsInRange: number[];
+          missing: number[];
+          total: number;
+          totalReleased: number;
+        }>();
+
         for (const ep of eps) {
-          if (!seasonMap.has(ep.seasonNumber)) seasonMap.set(ep.seasonNumber, { uploaded: [], noFile: [] });
+          if (!seasonMap.has(ep.seasonNumber)) {
+            seasonMap.set(ep.seasonNumber, { uploaded: [], noFile: [], upcoming: [], gapsInRange: [], missing: [], total: 0, totalReleased: 0 });
+          }
           const s = seasonMap.get(ep.seasonNumber)!;
           const hasFile = ep.fileId && ep.fileId.trim() !== '' && !(ep.fileUniqueId || '').startsWith('tmdb_');
-          if (hasFile) s.uploaded.push(ep.episodeNumber);
-          else s.noFile.push(ep.episodeNumber);
+          const isAired = !ep.airDate || ep.airDate <= today;
+
+          if (hasFile) {
+            s.uploaded.push(ep.episodeNumber);
+          } else if (isAired) {
+            s.noFile.push(ep.episodeNumber); // aired but no file = truly missing
+          } else {
+            s.upcoming.push(ep.episodeNumber); // not yet aired = upcoming
+          }
         }
 
         const seasons = [];
@@ -509,15 +559,36 @@ export async function registerRoutes(
         for (const [sNum, data] of seasonMap) {
           const uploaded = data.uploaded.sort((a, b) => a - b);
           const noFile = data.noFile.sort((a, b) => a - b);
-          const allNums = [...uploaded, ...noFile].sort((a, b) => a - b);
+          const upcoming = data.upcoming.sort((a, b) => a - b);
+
+          // Determine max aired episode (uploaded + noFile aired, exclude upcoming)
+          const airedNums = [...uploaded, ...noFile].sort((a, b) => a - b);
+          const maxReleased = airedNums.length ? airedNums[airedNums.length - 1] : 0;
+
+          // Total range (including upcoming) for display
+          const allNums = [...uploaded, ...noFile, ...upcoming].sort((a, b) => a - b);
           const maxEp = allNums.length ? allNums[allNums.length - 1] : 0;
+
+          // Gaps = episode numbers within aired range not in DB at all
           const inDb = new Set(allNums);
-          const gapsInRange = maxEp > 0
-            ? Array.from({ length: maxEp }, (_, i) => i + 1).filter(n => !inDb.has(n))
+          const gapsInRange = maxReleased > 0
+            ? Array.from({ length: maxReleased }, (_, i) => i + 1).filter(n => !inDb.has(n))
             : [];
+
+          // Missing = aired with no file + gaps within aired range
           const missing = [...noFile, ...gapsInRange].sort((a, b) => a - b);
           totalMissing += missing.length;
-          seasons.push({ season: sNum, uploaded, noFile, gapsInRange, missing, total: maxEp });
+
+          seasons.push({
+            season: sNum,
+            uploaded,
+            noFile,
+            upcoming,
+            gapsInRange,
+            missing,
+            total: maxEp,
+            totalReleased: maxReleased,
+          });
         }
 
         if (totalMissing > 0) {
@@ -526,6 +597,7 @@ export async function registerRoutes(
             title: series.title,
             posterPath: series.posterPath,
             tmdbId: series.tmdbId,
+            status: series.status,
             seasons: seasons.sort((a, b) => a.season - b.season),
             totalMissing,
           });

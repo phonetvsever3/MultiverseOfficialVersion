@@ -16,7 +16,7 @@ import { eq, desc, sql, like, and, gte, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Movies
-  getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string }): Promise<{ items: Movie[], total: number }>;
+  getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean }): Promise<{ items: Movie[], total: number }>;
   getMoviesByIds(ids: number[]): Promise<Movie[]>;
   incrementMovieViews(id: number): Promise<void>;
   logDailyView(movieId?: number): Promise<void>;
@@ -122,7 +122,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(backups.createdAt))
       .limit(limit);
   }
-  async getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string }): Promise<{ items: Movie[], total: number }> {
+  async getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean }): Promise<{ items: Movie[], total: number }> {
     const conditions = [];
     if (params.search) {
       const q = `%${params.search.toLowerCase()}%`;
@@ -135,6 +135,14 @@ export class DatabaseStorage implements IStorage {
     }
     if (params.type) conditions.push(eq(movies.type, params.type as any));
     if (params.language) conditions.push(eq(movies.originalLanguage, params.language));
+    if (params.status) conditions.push(eq(movies.status, params.status));
+    if (params.missingEpisodes) {
+      conditions.push(sql`${movies.type} = 'series'`);
+      conditions.push(sql`${movies.id} IN (
+        SELECT DISTINCT movie_id FROM episodes
+        WHERE (file_id = '' OR file_unique_id LIKE 'tmdb_%')
+      )`);
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 

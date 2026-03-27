@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useMovies, useDeleteMovie, useCreateMovie, useUpdateMovie } from "@/hooks/use-movies";
-import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send, Download } from "lucide-react";
+import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send, Download, AlertTriangle, Radio, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -322,11 +322,34 @@ function EpisodeManager({ movieId, tmdbId }: { movieId: number, tmdbId?: number 
 
 const PER_PAGE = 50;
 
+type LibraryFilter = 'all' | 'movie' | 'series' | 'ongoing' | 'missing';
+
+const FILTER_TABS: { key: LibraryFilter; label: string; icon: any }[] = [
+  { key: 'all', label: 'All', icon: Database },
+  { key: 'movie', label: 'Movie', icon: Film },
+  { key: 'series', label: 'Series', icon: Tv },
+  { key: 'ongoing', label: 'Ongoing', icon: Radio },
+  { key: 'missing', label: 'Missing Episode', icon: AlertTriangle },
+];
+
 export default function AdminMovies() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useMovies({ search, page, limit: PER_PAGE });
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>('all');
+  const [togglingStatusId, setTogglingStatusId] = useState<number | null>(null);
+
+  const moviesQueryFilters = {
+    search,
+    page,
+    limit: PER_PAGE,
+    ...(libraryFilter === 'movie' ? { type: 'movie' as const } : {}),
+    ...(libraryFilter === 'series' ? { type: 'series' as const } : {}),
+    ...(libraryFilter === 'ongoing' ? { status: 'ongoing' } : {}),
+    ...(libraryFilter === 'missing' ? { missingEpisodes: true } : {}),
+  };
+
+  const { data, isLoading } = useMovies(moviesQueryFilters);
   const { mutate: deleteMovie } = useDeleteMovie();
   const { mutate: createMovie, isPending: isCreating } = useCreateMovie();
   const { mutate: updateMovie, isPending: isUpdating } = useUpdateMovie();
@@ -337,6 +360,29 @@ export default function AdminMovies() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const [postingChannelId, setPostingChannelId] = useState<number | null>(null);
+
+  const handleToggleStatus = async (movie: any) => {
+    setTogglingStatusId(movie.id);
+    const newStatus = movie.status === 'ongoing' ? 'completed' : 'ongoing';
+    try {
+      const res = await fetch(`/api/admin/movies/${movie.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ['/api/movies'] });
+        toast({ title: `Marked as ${newStatus}`, description: `${movie.title} is now ${newStatus}` });
+      } else {
+        const err = await res.json();
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setTogglingStatusId(null);
+    }
+  };
 
   const removeDuplicates = useMutation({
     mutationFn: async () => {
@@ -409,6 +455,11 @@ export default function AdminMovies() {
 
   const handleSearchChange = (val: string) => {
     setSearch(val);
+    setPage(1);
+  };
+
+  const handleFilterChange = (f: LibraryFilter) => {
+    setLibraryFilter(f);
     setPage(1);
   };
 
@@ -767,6 +818,29 @@ export default function AdminMovies() {
           </div>
         </div>
 
+        {/* Library Filter Tabs */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {FILTER_TABS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => handleFilterChange(key)}
+              data-testid={`filter-${key}`}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition-all border ${
+                libraryFilter === key
+                  ? key === 'missing'
+                    ? 'bg-red-500/20 text-red-400 border-red-500/40'
+                    : key === 'ongoing'
+                    ? 'bg-green-500/20 text-green-400 border-green-500/40'
+                    : 'bg-primary/20 text-primary border-primary/40'
+                  : 'bg-secondary/30 text-muted-foreground border-border hover:border-primary/30 hover:text-foreground'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="bg-card border border-border rounded-[1.5rem] overflow-hidden shadow-2xl">
           <div className="grid grid-cols-12 gap-4 p-6 border-b border-border bg-secondary/20 text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">
             <div className="col-span-5">Content Details</div>
@@ -796,7 +870,14 @@ export default function AdminMovies() {
                         )}
                       </div>
                       <div className="flex flex-col">
-                        <span className="font-black text-foreground text-sm uppercase tracking-tight group-hover:text-primary transition-colors">{movie.title}</span>
+                        <span className="font-black text-foreground text-sm uppercase tracking-tight group-hover:text-primary transition-colors flex items-center gap-2">
+                          {movie.title}
+                          {movie.type === 'series' && movie.status === 'ongoing' && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-400 text-[9px] font-black uppercase tracking-widest border border-green-500/25">
+                              <Radio className="w-2.5 h-2.5" /> Ongoing
+                            </span>
+                          )}
+                        </span>
                         <span className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-1 font-bold">
                           {movie.releaseDate?.split('-')[0] || 'N/A'} <span className="w-1 h-1 rounded-full bg-border" /> {movie.views} views
                         </span>
@@ -812,14 +893,32 @@ export default function AdminMovies() {
                     </div>
                     <div className="col-span-3 flex justify-end gap-2" onClick={e => e.stopPropagation()}>
                       {movie.type === 'series' && (
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-9 w-9 text-muted-foreground hover:bg-white/5"
-                          onClick={() => setExpandedRow(expandedRow === movie.id ? null : movie.id)}
-                        >
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${expandedRow === movie.id ? 'rotate-180' : ''}`} />
-                        </Button>
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-9 w-9 transition-colors ${movie.status === 'ongoing' ? 'text-green-400 hover:text-green-300 hover:bg-green-500/10' : 'text-muted-foreground hover:text-green-400 hover:bg-green-500/10'}`}
+                            title={movie.status === 'ongoing' ? 'Mark as Completed' : 'Mark as Ongoing'}
+                            onClick={() => handleToggleStatus(movie)}
+                            disabled={togglingStatusId === movie.id}
+                            data-testid={`button-status-${movie.id}`}
+                          >
+                            {togglingStatusId === movie.id
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : movie.status === 'ongoing'
+                              ? <Radio className="w-4 h-4" />
+                              : <CheckCircle2 className="w-4 h-4" />
+                            }
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-9 w-9 text-muted-foreground hover:bg-white/5"
+                            onClick={() => setExpandedRow(expandedRow === movie.id ? null : movie.id)}
+                          >
+                            <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${expandedRow === movie.id ? 'rotate-180' : ''}`} />
+                          </Button>
+                        </>
                       )}
                       {/* Post to Telegram Channel */}
                       <Button

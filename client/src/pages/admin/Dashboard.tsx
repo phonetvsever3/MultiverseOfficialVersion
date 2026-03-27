@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { StatsCard } from "@/components/StatsCard";
 import { useDashboardStats } from "@/hooks/use-stats";
-import { Users, Film, Eye, MonitorPlay, BarChart2, Link2 } from "lucide-react";
+import { Users, Film, Eye, MonitorPlay, BarChart2, Link2, AlertTriangle, ChevronRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 
@@ -27,9 +27,24 @@ function fillGaps(data: ViewStat[], days: number): ViewStat[] {
   return result;
 }
 
+interface SeriesGap { id: number; title: string; totalMissing: number; }
+
 export default function AdminDashboard() {
   const { data: stats, isLoading } = useDashboardStats();
   const [period, setPeriod] = useState<"7d" | "30d">("7d");
+  const [alarmDismissed, setAlarmDismissed] = useState(false);
+
+  const { data: episodeGaps = [] } = useQuery<SeriesGap[]>({
+    queryKey: ["/api/admin/episode-gaps"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/episode-gaps");
+      return res.json();
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const totalMissing = episodeGaps.reduce((sum, s) => sum + s.totalMissing, 0);
+  const affectedSeries = episodeGaps.length;
 
   const { data: rawViewStats = [] } = useQuery<ViewStat[]>({
     queryKey: ["/api/admin/view-stats", period],
@@ -58,6 +73,36 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-bold font-display text-foreground">Overview</h1>
           <p className="text-muted-foreground">Welcome back, Admin. Here's what's happening.</p>
         </header>
+
+        {/* Missing Episode Alarm Banner */}
+        {totalMissing > 0 && !alarmDismissed && (
+          <div className="mb-6 flex items-center gap-4 bg-red-500/10 border border-red-500/30 rounded-2xl px-5 py-4" data-testid="banner-missing-episodes">
+            <div className="flex-shrink-0 p-2 bg-red-500/20 rounded-xl">
+              <AlertTriangle className="w-5 h-5 text-red-400 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-black text-red-400 uppercase tracking-wide">Missing Episodes Detected</p>
+              <p className="text-xs text-red-300/80 mt-0.5">
+                <span className="font-bold text-red-300">{totalMissing}</span> missing episode{totalMissing !== 1 ? "s" : ""} across{" "}
+                <span className="font-bold text-red-300">{affectedSeries}</span> series — files not yet synced
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Link href="/admin/episode-checker">
+                <span className="flex items-center gap-1 text-xs font-bold text-red-300 hover:text-red-200 transition-colors cursor-pointer whitespace-nowrap">
+                  View All <ChevronRight className="w-3.5 h-3.5" />
+                </span>
+              </Link>
+              <button
+                onClick={() => setAlarmDismissed(true)}
+                className="text-xs text-red-400/50 hover:text-red-400 transition-colors ml-2 font-bold"
+                title="Dismiss for this session"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

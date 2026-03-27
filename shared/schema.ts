@@ -28,6 +28,7 @@ export const movies = pgTable("movies", {
   genre: text("genre"),
   originalLanguage: text("original_language"),
   postedToChannel: boolean("posted_to_channel").default(false),
+  status: text("status").default("completed"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

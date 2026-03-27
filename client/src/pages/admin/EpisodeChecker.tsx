@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AdminSidebar } from "@/components/AdminSidebar";
-import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle, Upload, Search, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle, Upload, Search, RefreshCw, Clock, Radio } from "lucide-react";
 
 const TMDB_IMAGE = "https://image.tmdb.org/t/p/";
 
@@ -9,9 +9,11 @@ interface SeasonGap {
   season: number;
   uploaded: number[];
   noFile: number[];
+  upcoming: number[];
   gapsInRange: number[];
   missing: number[];
   total: number;
+  totalReleased: number;
 }
 
 interface SeriesGap {
@@ -19,6 +21,7 @@ interface SeriesGap {
   title: string;
   posterPath: string | null;
   tmdbId: number | null;
+  status: string | null;
   seasons: SeasonGap[];
   totalMissing: number;
 }
@@ -40,6 +43,7 @@ function EpBadge({ num, type }: { num: number; type: "uploaded" | "missing" | "n
 function SeasonRow({ season }: { season: SeasonGap }) {
   const [open, setOpen] = useState(true);
   const hasMissing = season.missing.length > 0;
+  const hasUpcoming = (season.upcoming || []).length > 0;
   return (
     <div className="border border-border rounded-xl overflow-hidden mb-2">
       <button
@@ -50,7 +54,8 @@ function SeasonRow({ season }: { season: SeasonGap }) {
           {open ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
           <span className="font-bold text-sm text-foreground">Season {season.season}</span>
           <span className="text-xs text-muted-foreground">
-            {season.uploaded.length} uploaded / {season.total} total ep range
+            {season.uploaded.length} synced / {season.totalReleased || season.total} released
+            {season.total > (season.totalReleased || season.total) ? ` (${season.total} total)` : ""}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -63,6 +68,11 @@ function SeasonRow({ season }: { season: SeasonGap }) {
               <CheckCircle className="w-3 h-3" /> Complete
             </span>
           )}
+          {hasUpcoming && (
+            <span className="flex items-center gap-1 text-xs font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded-lg">
+              <Clock className="w-3 h-3" /> {(season.upcoming || []).length} upcoming
+            </span>
+          )}
         </div>
       </button>
       {open && (
@@ -70,7 +80,7 @@ function SeasonRow({ season }: { season: SeasonGap }) {
           {season.uploaded.length > 0 && (
             <div>
               <p className="text-[11px] text-green-400/70 font-bold uppercase tracking-wider mb-2 flex items-center gap-1">
-                <Upload className="w-3 h-3" /> Uploaded ({season.uploaded.length})
+                <Upload className="w-3 h-3" /> Synced / Uploaded ({season.uploaded.length})
               </p>
               <div className="flex flex-wrap gap-1">
                 {season.uploaded.map(n => <EpBadge key={n} num={n} type="uploaded" />)}
@@ -80,7 +90,7 @@ function SeasonRow({ season }: { season: SeasonGap }) {
           {season.noFile.length > 0 && (
             <div>
               <p className="text-[11px] text-yellow-400/70 font-bold uppercase tracking-wider mb-2">
-                Metadata Only — No File ({season.noFile.length})
+                Aired — No File Synced ({season.noFile.length})
               </p>
               <div className="flex flex-wrap gap-1">
                 {season.noFile.map(n => <EpBadge key={n} num={n} type="nofile" />)}
@@ -90,15 +100,27 @@ function SeasonRow({ season }: { season: SeasonGap }) {
           {season.gapsInRange.length > 0 && (
             <div>
               <p className="text-[11px] text-red-400/70 font-bold uppercase tracking-wider mb-2">
-                Not in Database ({season.gapsInRange.length})
+                Aired — Not in Database ({season.gapsInRange.length})
               </p>
               <div className="flex flex-wrap gap-1">
                 {season.gapsInRange.map(n => <EpBadge key={n} num={n} type="missing" />)}
               </div>
             </div>
           )}
-          {season.missing.length === 0 && (
-            <p className="text-xs text-muted-foreground italic">All episodes in range are uploaded.</p>
+          {hasUpcoming && (
+            <div>
+              <p className="text-[11px] text-blue-400/70 font-bold uppercase tracking-wider mb-2 flex items-center gap-1">
+                <Clock className="w-3 h-3" /> Not Yet Aired — Upcoming ({(season.upcoming || []).length})
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {(season.upcoming || []).map(n => (
+                  <span key={n} className="inline-flex items-center justify-center w-8 h-8 rounded-lg border bg-blue-500/10 text-blue-400 border-blue-500/20 text-[11px] font-bold">{n}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {season.missing.length === 0 && !hasUpcoming && (
+            <p className="text-xs text-muted-foreground italic">All aired episodes are synced.</p>
           )}
         </div>
       )}
@@ -124,7 +146,14 @@ function SeriesCard({ series }: { series: SeriesGap }) {
           <div className="w-10 h-14 bg-white/5 rounded-lg flex-shrink-0" />
         )}
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-sm text-foreground truncate">{series.title}</p>
+          <p className="font-bold text-sm text-foreground truncate flex items-center gap-2">
+            {series.title}
+            {series.status === 'ongoing' && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-400 text-[9px] font-black uppercase tracking-widest border border-green-500/25">
+                <Radio className="w-2.5 h-2.5" /> Ongoing
+              </span>
+            )}
+          </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {series.seasons.length} season{series.seasons.length !== 1 ? "s" : ""}
             {series.tmdbId ? ` · TMDB ${series.tmdbId}` : ""}
@@ -212,15 +241,19 @@ export default function EpisodeChecker() {
         <div className="flex flex-wrap gap-4 mb-6 p-4 bg-card border border-border rounded-2xl">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-green-500/20 border border-green-500/30 flex items-center justify-center text-[10px] font-bold text-green-400">1</div>
-            <span className="text-sm text-muted-foreground">Uploaded (has file)</span>
+            <span className="text-sm text-muted-foreground">Synced (has file)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-[10px] font-bold text-yellow-400">2</div>
-            <span className="text-sm text-muted-foreground">Metadata only (no file uploaded)</span>
+            <span className="text-sm text-muted-foreground">Aired — no file yet</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-red-500/20 border border-red-500/30 flex items-center justify-center text-[10px] font-bold text-red-400">3</div>
-            <span className="text-sm text-muted-foreground">Not in database</span>
+            <span className="text-sm text-muted-foreground">Aired — not in database</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-[10px] font-bold text-blue-400">4</div>
+            <span className="text-sm text-muted-foreground">Not yet aired (upcoming)</span>
           </div>
         </div>
 
