@@ -12,7 +12,7 @@ import {
   type FootballApiKey, type InsertFootballApiKey,
   type AppUrl, type InsertAppUrl,
 } from "@shared/schema";
-import { eq, desc, sql, like, and, gte, inArray } from "drizzle-orm";
+import { eq, desc, sql, like, ilike, and, gte, lte, inArray, or } from "drizzle-orm";
 
 export interface IStorage {
   // Movies
@@ -47,7 +47,7 @@ export interface IStorage {
   deleteChannel(id: number): Promise<void>;
 
   // Synced Files
-  getSyncedFiles(): Promise<SyncedFile[]>;
+  getSyncedFiles(params?: { search?: string; fileIdSearch?: string; type?: "movie" | "series"; listed?: "listed" | "not_listed"; dateFrom?: string; dateTo?: string; sort?: "az" | "za"; limit?: number; offset?: number }): Promise<{ items: (SyncedFile & { isListed: boolean })[]; total: number }>;
   getSyncedFileById(id: number): Promise<SyncedFile | undefined>;
   createSyncedFile(file: InsertSyncedFile): Promise<SyncedFile>;
   getSyncedFileByUniqueId(fileUniqueId: string): Promise<SyncedFile | undefined>;
@@ -326,8 +326,72 @@ export class DatabaseStorage implements IStorage {
     await db.delete(channels).where(eq(channels.id, id));
   }
 
-  async getSyncedFiles(): Promise<SyncedFile[]> {
-    return await db.select().from(syncedFiles).orderBy(desc(syncedFiles.createdAt));
+  async getSyncedFiles(params: { search?: string; fileIdSearch?: string; type?: "movie" | "series"; listed?: "listed" | "not_listed"; dateFrom?: string; dateTo?: string; sort?: "az" | "za"; limit?: number; offset?: number } = {}): Promise<{ items: (SyncedFile & { isListed: boolean })[]; total: number }> {
+    const { search, fileIdSearch, type, listed, dateFrom, dateTo, sort, limit = 200, offset = 0 } = params;
+
+    // isListed subquery: file exists in movies OR episodes by fileUniqueId
+    const isListedExpr = sql<boolean>`(
+      EXISTS (SELECT 1 FROM movies WHERE movies.file_unique_id = ${syncedFiles.fileUniqueId})
+      OR EXISTS (SELECT 1 FROM episodes WHERE episodes.file_unique_id = ${syncedFiles.fileUniqueId})
+    )`;
+
+    const conditions: any[] = [];
+
+    if (search?.trim()) {
+      conditions.push(ilike(syncedFiles.fileName, `%${search.trim()}%`));
+    }
+    if (fileIdSearch?.trim()) {
+      conditions.push(ilike(syncedFiles.fileId, `%${fileIdSearch.trim()}%`));
+    }
+    if (type === "series") {
+      conditions.push(sql`${syncedFiles.fileName} ~* 's[0-9]{1,2}e[0-9]{1,2}'`);
+    } else if (type === "movie") {
+      conditions.push(sql`NOT (${syncedFiles.fileName} ~* 's[0-9]{1,2}e[0-9]{1,2}')`);
+    }
+    if (listed === "listed") {
+      conditions.push(sql`(
+        EXISTS (SELECT 1 FROM movies WHERE movies.file_unique_id = ${syncedFiles.fileUniqueId})
+        OR EXISTS (SELECT 1 FROM episodes WHERE episodes.file_unique_id = ${syncedFiles.fileUniqueId})
+      )`);
+    } else if (listed === "not_listed") {
+      conditions.push(sql`NOT (
+        EXISTS (SELECT 1 FROM movies WHERE movies.file_unique_id = ${syncedFiles.fileUniqueId})
+        OR EXISTS (SELECT 1 FROM episodes WHERE episodes.file_unique_id = ${syncedFiles.fileUniqueId})
+      )`);
+    }
+    if (dateFrom) {
+      conditions.push(gte(syncedFiles.createdAt, new Date(dateFrom)));
+    }
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(syncedFiles.createdAt, end));
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Count total
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(syncedFiles)
+      .where(where);
+
+    // Determine ORDER BY
+    let orderBy: any;
+    if (sort === "az") orderBy = syncedFiles.fileName;
+    else if (sort === "za") orderBy = desc(syncedFiles.fileName);
+    else orderBy = desc(syncedFiles.createdAt);
+
+    // Fetch page with isListed computed field
+    const rows = await db
+      .select({ ...syncedFiles, isListed: isListedExpr })
+      .from(syncedFiles)
+      .where(where)
+      .orderBy(orderBy)
+      .limit(limit)
+      .offset(offset);
+
+    return { items: rows as any, total: count };
   }
 
   async createSyncedFile(file: InsertSyncedFile): Promise<SyncedFile> {

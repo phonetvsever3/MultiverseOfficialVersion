@@ -251,7 +251,7 @@ export async function startBot() {
       } catch (e) {}
     }
 
-    const syncedFiles = await storage.getSyncedFiles();
+    const { items: syncedFiles } = await storage.getSyncedFiles({ limit: 10000 });
     const sf = syncedFiles.find(f => f.id === id);
     if (sf?.fileId) {
       try {

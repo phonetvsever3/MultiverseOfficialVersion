@@ -663,8 +663,19 @@ export async function registerRoutes(
   });
 
   app.get("/api/synced-files", async (req, res) => {
-    const files = await storage.getSyncedFiles();
-    res.json(files);
+    const { search, fileIdSearch, type, listed, dateFrom, dateTo, sort, limit, offset } = req.query as Record<string, string>;
+    const result = await storage.getSyncedFiles({
+      search,
+      fileIdSearch,
+      type: type as "movie" | "series" | undefined,
+      listed: listed as "listed" | "not_listed" | undefined,
+      dateFrom,
+      dateTo,
+      sort: sort as "az" | "za" | undefined,
+      limit: limit ? parseInt(limit) : 200,
+      offset: offset ? parseInt(offset) : 0,
+    });
+    res.json(result);
   });
 
   app.delete("/api/synced-files/:id", async (req, res) => {
@@ -729,7 +740,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "TMDB API key not configured in settings" });
       }
 
-      const allFiles = await storage.getSyncedFiles();
+      const { items: allFiles } = await storage.getSyncedFiles({ limit: 10000 });
       const results = { added: 0, skipped: 0, failed: 0, errors: [] as string[], addedTitles: [] as string[] };
 
       for (const file of allFiles) {
