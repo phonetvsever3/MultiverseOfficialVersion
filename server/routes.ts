@@ -662,6 +662,118 @@ export async function registerRoutes(
     res.json(settings);
   });
 
+  // ── FileStreamBot Routes ──────────────────────────────────────────────────
+  // Test connectivity to configured FSB instance
+  app.get("/api/admin/fsb/test", requireAdmin, async (_req, res) => {
+    try {
+      const cfg = await storage.getSettings();
+      if (!cfg?.fsbBaseUrl) return res.status(400).json({ ok: false, message: "FSB base URL not configured" });
+      const url = cfg.fsbBaseUrl.replace(/\/$/, "");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const r = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+        res.json({ ok: true, status: r.status, message: `Reachable (HTTP ${r.status})` });
+      } catch (e: any) {
+        clearTimeout(timeout);
+        res.json({ ok: false, message: e.name === "AbortError" ? "Timeout — server did not respond in 5s" : e.message });
+      }
+    } catch (e: any) {
+      res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
+  // Get all movies with their stream URL status for FSB management
+  app.get("/api/admin/fsb/movies", requireAdmin, async (req, res) => {
+    try {
+      const { page = "1", search = "", filter = "all" } = req.query as Record<string, string>;
+      const pageNum = parseInt(page) || 1;
+      const limit = 50;
+      const offset = (pageNum - 1) * limit;
+      const { db } = await import("./db");
+      const { movies: moviesTable } = await import("../shared/schema");
+      const { ilike, or, isNull, isNotNull, sql: drizzleSql } = await import("drizzle-orm");
+      let query = db.select({
+        id: moviesTable.id,
+        title: moviesTable.title,
+        type: moviesTable.type,
+        quality: moviesTable.quality,
+        posterPath: moviesTable.posterPath,
+        streamUrl: moviesTable.streamUrl,
+        fileId: moviesTable.fileId,
+        fileSize: moviesTable.fileSize,
+      }).from(moviesTable);
+      const conditions: any[] = [];
+      if (search) conditions.push(ilike(moviesTable.title, `%${search}%`));
+      if (filter === "linked") conditions.push(isNotNull(moviesTable.streamUrl));
+      if (filter === "unlinked") conditions.push(isNull(moviesTable.streamUrl));
+      const allRows = conditions.length > 0
+        ? await query.where(conditions.length === 1 ? conditions[0] : drizzleSql`${conditions[0]} AND ${conditions[1]}`)
+        : await query;
+      const total = allRows.length;
+      const items = allRows.slice(offset, offset + limit);
+      res.json({ items, total, page: pageNum, totalPages: Math.ceil(total / limit) });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Get episodes for a series with their stream URL status
+  app.get("/api/admin/fsb/series/:id/episodes", requireAdmin, async (req, res) => {
+    try {
+      const movieId = Number(req.params.id);
+      const eps = await storage.getEpisodes(movieId);
+      res.json(eps);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Set stream URL for a movie
+  app.patch("/api/admin/movies/:id/stream-url", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { streamUrl } = req.body;
+      const updated = await storage.updateMovie(id, { streamUrl: streamUrl || null } as any);
+      if (!updated) return res.status(404).json({ message: "Movie not found" });
+      invalidatePrefix("movies:");
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Set stream URL for an episode
+  app.patch("/api/admin/episodes/:id/stream-url", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { streamUrl } = req.body;
+      const updated = await storage.updateEpisode(id, { streamUrl: streamUrl || null } as any);
+      if (!updated) return res.status(404).json({ message: "Episode not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Bulk set stream URLs for movies (array of {id, streamUrl})
+  app.post("/api/admin/fsb/bulk-update", requireAdmin, async (req, res) => {
+    try {
+      const { updates } = req.body as { updates: { id: number; streamUrl: string | null }[] };
+      if (!Array.isArray(updates)) return res.status(400).json({ message: "updates must be an array" });
+      const results = await Promise.allSettled(
+        updates.map(({ id, streamUrl }) => storage.updateMovie(id, { streamUrl: streamUrl || null } as any))
+      );
+      const succeeded = results.filter(r => r.status === "fulfilled").length;
+      invalidatePrefix("movies:");
+      res.json({ succeeded, failed: results.length - succeeded });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+  // ─────────────────────────────────────────────────────────────────────────
+
   app.get("/api/synced-files", async (req, res) => {
     const { search, fileIdSearch, type, listed, dateFrom, dateTo, sort, limit, offset } = req.query as Record<string, string>;
     const result = await storage.getSyncedFiles({
@@ -2076,6 +2188,117 @@ export async function registerRoutes(
       });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
+    }
+  });
+
+  // In-memory cache: fileId → { downloadUrl, fileSize, expiresAt }
+  const tgUrlCache = new Map<string, { downloadUrl: string; fileSize?: number; expiresAt: number }>();
+
+  async function resolveTelegramUrl(fileId: string, token: string): Promise<{ downloadUrl: string; fileSize?: number }> {
+    const cached = tgUrlCache.get(fileId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { downloadUrl: cached.downloadUrl, fileSize: cached.fileSize };
+    }
+
+    const fileInfoRes = await fetch(
+      `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`
+    );
+    const fileInfo = (await fileInfoRes.json()) as any;
+
+    if (!fileInfo.ok || !fileInfo.result?.file_path) {
+      throw Object.assign(new Error("File not found on Telegram"), { status: 404 });
+    }
+
+    const filePath: string = fileInfo.result.file_path;
+    const fileSize: number | undefined = fileInfo.result.file_size;
+    const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+
+    // Cache for 25 minutes (Telegram links last ~1 hour)
+    tgUrlCache.set(fileId, { downloadUrl, fileSize, expiresAt: Date.now() + 25 * 60 * 1000 });
+    return { downloadUrl, fileSize };
+  }
+
+  // Quick check — resolves fileId without streaming, used by the player before opening
+  app.get("/api/stream/telegram/:fileId/check", async (req, res) => {
+    try {
+      const { fileId } = req.params;
+      const cfg = await storage.getSettings();
+      const token = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return res.status(503).json({ ok: false, message: "Bot token not configured. Go to Admin → Settings and enter your bot token." });
+
+      const { fileSize } = await resolveTelegramUrl(fileId, token);
+      res.json({ ok: true, fileSize });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ ok: false, message: err.message });
+    }
+  });
+
+  // Telegram file direct streaming with Range request support + caching
+  app.get("/api/stream/telegram/:fileId", async (req, res) => {
+    try {
+      const { fileId } = req.params;
+      if (!fileId) return res.status(400).send("Missing fileId");
+
+      const cfg = await storage.getSettings();
+      const token = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return res.status(503).json({ message: "Bot token not configured. Set it in Admin → Settings." });
+
+      const { downloadUrl, fileSize } = await resolveTelegramUrl(fileId, token);
+      const isDownload = req.query.download === "1";
+      const { Readable } = await import("stream");
+
+      const rangeHeader = req.headers.range;
+
+      if (rangeHeader && fileSize) {
+        const parts = rangeHeader.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+
+        const upstream = await fetch(downloadUrl, {
+          headers: { Range: `bytes=${start}-${end}` },
+        });
+
+        if (!upstream.ok || !upstream.body) {
+          return res.status(502).send("Upstream error");
+        }
+
+        res.writeHead(206, {
+          "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(chunkSize),
+          "Content-Type": "video/mp4",
+          "Cache-Control": "no-store",
+          ...(isDownload ? { "Content-Disposition": `attachment; filename="video.mp4"` } : {}),
+        });
+
+        const nodeStream = Readable.fromWeb(upstream.body as any);
+        nodeStream.pipe(res);
+        req.on("close", () => nodeStream.destroy());
+      } else {
+        const upstream = await fetch(downloadUrl);
+
+        if (!upstream.ok || !upstream.body) {
+          return res.status(502).send("Failed to fetch from Telegram");
+        }
+
+        const headers: Record<string, string> = {
+          "Content-Type": "video/mp4",
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-store",
+          ...(isDownload ? { "Content-Disposition": `attachment; filename="video.mp4"` } : {}),
+        };
+        if (fileSize) headers["Content-Length"] = String(fileSize);
+
+        res.writeHead(200, headers);
+
+        const nodeStream = Readable.fromWeb(upstream.body as any);
+        nodeStream.pipe(res);
+        req.on("close", () => nodeStream.destroy());
+      }
+    } catch (err: any) {
+      console.error("[Telegram stream]", err);
+      if (!res.headersSent) res.status(err.status || 500).send(err.message);
     }
   });
 

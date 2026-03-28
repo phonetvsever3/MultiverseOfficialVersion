@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSettingsSchema, type Settings } from "@shared/schema";
-import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X } from "lucide-react";
+import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -201,6 +201,9 @@ export default function AdminSettings() {
       autoPostSeries: settings?.autoPostSeries ?? false,
       autoAddMovies: settings?.autoAddMovies ?? false,
       adminTelegramUsername: settings?.adminTelegramUsername || "",
+      fsbEnabled: settings?.fsbEnabled ?? false,
+      fsbBaseUrl: settings?.fsbBaseUrl || "",
+      fsbHashLength: settings?.fsbHashLength ?? 6,
     }
   });
 
@@ -217,6 +220,9 @@ export default function AdminSettings() {
         autoPostSeries: settings.autoPostSeries ?? false,
         autoAddMovies: settings.autoAddMovies ?? false,
         adminTelegramUsername: settings.adminTelegramUsername || "",
+        fsbEnabled: settings.fsbEnabled ?? false,
+        fsbBaseUrl: settings.fsbBaseUrl || "",
+        fsbHashLength: settings.fsbHashLength ?? 6,
       });
       setPackages(settings.supportPackages || []);
     }
@@ -489,6 +495,84 @@ export default function AdminSettings() {
                         <Plus className="w-3.5 h-3.5" /> Add Package
                       </Button>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="hover-elevate border-yellow-500/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-yellow-400" />
+                    FileStreamBot (FSB)
+                  </CardTitle>
+                  <CardDescription>
+                    Connect a{" "}
+                    <a href="https://github.com/EverythingSuckz/TG-FileStreamBot" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      TG-FileStreamBot
+                    </a>{" "}
+                    instance to stream files larger than 20 MB directly from Telegram.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="fsbEnabled"
+                    render={({ field }) => (
+                      <FormItem className="flex items-center justify-between rounded-xl border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
+                        <div>
+                          <FormLabel className="text-sm font-semibold">Enable FileStreamBot</FormLabel>
+                          <p className="text-xs text-muted-foreground mt-0.5">Show Play buttons for movies that have a stream URL linked</p>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value ?? false} onCheckedChange={field.onChange} data-testid="switch-fsb-enabled" />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="fsbBaseUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>FSB Base URL</FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value ?? ""} placeholder="https://your-filestream-bot.example.com" className="font-mono" data-testid="input-fsb-base-url" />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">The public URL of your TG-FileStreamBot instance (no trailing slash).</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="fsbHashLength"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Hash Length</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="number"
+                            min={4}
+                            max={32}
+                            value={field.value ?? 6}
+                            onChange={e => field.onChange(parseInt(e.target.value) || 6)}
+                            className="w-32"
+                            data-testid="input-fsb-hash-length"
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">Chars used from the MD5 hash in stream URLs (default: 6, must match your FSB config).</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="pt-1">
+                    <a
+                      href="/admin/file-stream-bot"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <Zap className="w-3 h-3" /> Manage stream URLs →
+                    </a>
                   </div>
                 </CardContent>
               </Card>

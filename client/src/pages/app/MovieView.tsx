@@ -8,9 +8,8 @@ import { AdOverlay } from "@/components/AdOverlay";
 import { AdRenderer } from "@/components/AdRenderer";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { cn } from "@/lib/utils";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { type Episode, type Ad, type Movie } from "@shared/schema";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
+import { type Episode, type Ad, type Movie, type Settings } from "@shared/schema";
 import { fullscreenAdShownFor } from "@/lib/ad-session";
 import { addToWatchHistory } from "@/lib/watch-history";
 import { translateToMyanmar } from "@/lib/translate";
@@ -106,6 +105,8 @@ export default function MovieView() {
     enabled: !!movie && movie.type === 'series'
   });
 
+  const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 60000 });
+
   useEffect(() => {
     if (tg) {
       tg.ready();
@@ -149,13 +150,6 @@ export default function MovieView() {
       }
     };
   }, [selectedEpisode, movieId]);
-
-  const handlePlayClick = (episode?: Episode) => {
-    if (episode) setSelectedEpisode(episode);
-    setIsReadyToWatch(false);
-    setShowAd(true);
-    refetchAd(); 
-  };
 
   const handleDownloadClick = (episode?: Episode) => {
     if (episode) setSelectedEpisode(episode);
@@ -354,20 +348,25 @@ export default function MovieView() {
            ) : (
              movie.type === 'movie' && (
                <div className="flex flex-col gap-4">
+                 {/* Stream Play button — visible when FSB is enabled and a stream URL is set */}
+                 {settings?.fsbEnabled && movie.streamUrl && (
+                   <a
+                     href={movie.streamUrl}
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     data-testid="button-play-stream"
+                     className="w-full h-18 flex items-center justify-center gap-3 text-lg font-black bg-green-500 hover:bg-green-600 text-white rounded-[1.8rem] shadow-2xl shadow-green-500/40 border-b-[6px] border-green-950 active:border-b-0 active:translate-y-1.5 transition-all py-5 select-none"
+                   >
+                     <Play className="w-6 h-6 fill-white" /> Watch Now
+                   </a>
+                 )}
                  <Button 
                    size="lg" 
                    className="w-full h-18 text-lg font-black bg-primary hover:bg-primary/90 text-white rounded-[1.8rem] shadow-2xl shadow-primary/40 relative overflow-hidden group border-b-6 border-black/20"
-                   onClick={() => handlePlayClick()}
-                 >
-                   <Play className="w-6 h-6 mr-3 fill-current" /> Play Premium
-                 </Button>
-                 <Button 
-                   size="lg" 
-                   variant="outline"
-                   className="w-full h-18 text-lg font-black border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-[1.8rem] shadow-xl relative overflow-hidden group"
                    onClick={() => handleDownloadClick()}
+                   data-testid="button-premium-download"
                  >
-                   <Download className="w-6 h-6 mr-3 text-primary" /> Direct Download
+                   <Download className="w-6 h-6 mr-3 fill-current" /> Premium Download
                  </Button>
                </div>
              )
@@ -454,15 +453,18 @@ export default function MovieView() {
                         </span>
                       </div>
                       <div className="flex gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 px-4 text-[10px] font-black text-primary hover:bg-primary/10 rounded-full uppercase tracking-tighter"
-                          onClick={(e) => { e.stopPropagation(); handlePlayClick(ep); }}
-                          data-testid={`button-play-ep-${ep.id}`}
-                        >
-                          Play
-                        </Button>
+                        {settings?.fsbEnabled && ep.streamUrl && (
+                          <a
+                            href={ep.streamUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            data-testid={`button-play-ep-${ep.id}`}
+                            className="h-8 px-4 text-[10px] font-black text-white bg-green-500 hover:bg-green-600 rounded-full uppercase tracking-tighter flex items-center gap-1.5 transition-colors"
+                          >
+                            <Play className="w-3 h-3 fill-white" /> Play
+                          </a>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -470,7 +472,7 @@ export default function MovieView() {
                           onClick={(e) => { e.stopPropagation(); handleDownloadClick(ep); }}
                           data-testid={`button-dl-ep-${ep.id}`}
                         >
-                          DL
+                          Download
                         </Button>
                       </div>
                     </div>
@@ -640,6 +642,7 @@ export default function MovieView() {
           onClose={() => setShowFullscreenAd(false)}
         />
       )}
+
     </div>
   );
 }

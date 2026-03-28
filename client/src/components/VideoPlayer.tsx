@@ -22,6 +22,7 @@ interface VideoPlayerProps {
   title?: string;
   onClose: () => void;
   showMidrollAd?: boolean;
+  showPrerollAd?: boolean;
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -66,7 +67,7 @@ function unlockOrientation() {
   } catch {}
 }
 
-export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = false }: VideoPlayerProps) {
+export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = false, showPrerollAd = false }: VideoPlayerProps) {
   const wrapperRef    = useRef<HTMLDivElement>(null);
   const containerRef  = useRef<HTMLDivElement>(null);
   const playerRef     = useRef<ReturnType<typeof videojs> | null>(null);
@@ -102,6 +103,16 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
   const adTimerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const showMidrollRef = useRef(showMidrollAd);
   useEffect(() => { showMidrollRef.current = showMidrollAd; }, [showMidrollAd]);
+
+  // Pre-roll ad state
+  const [prerollVisible,   setPrerollVisible]   = useState(false);
+  const [prerollData,      setPrerollData]      = useState<Ad | null>(null);
+  const [prerollCountdown, setPrerollCountdown] = useState(15);
+  const [prerollSkippable, setPrerollSkippable] = useState(false);
+  const prerollShown    = useRef(false);
+  const prerollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const showPrerollRef  = useRef(showPrerollAd);
+  useEffect(() => { showPrerollRef.current = showPrerollAd; }, [showPrerollAd]);
 
   const resetHide = useCallback((isPlaying: boolean) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -149,6 +160,44 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       .catch(() => { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); });
   }, []);
 
+  const closePreroll = useCallback(() => {
+    if (prerollTimerRef.current) { clearInterval(prerollTimerRef.current); prerollTimerRef.current = null; }
+    setPrerollVisible(false);
+    setPrerollData(null);
+    setPrerollCountdown(15);
+    setPrerollSkippable(false);
+    const p = playerRef.current;
+    if (p && !p.isDisposed()) p.play();
+  }, []);
+
+  const triggerPrerollAd = useCallback(() => {
+    const p = playerRef.current;
+    if (p && !p.isDisposed()) p.pause();
+    fetch("/api/ads/serve")
+      .then(r => r.json())
+      .then((ad: Ad | null) => {
+        if (!ad) { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); return; }
+        setPrerollData(ad);
+        setPrerollCountdown(15);
+        setPrerollSkippable(false);
+        setPrerollVisible(true);
+        let count = 15;
+        prerollTimerRef.current = setInterval(() => {
+          count -= 1;
+          setPrerollCountdown(count);
+          if (count <= 5) setPrerollSkippable(true);
+          if (count <= 0) {
+            if (prerollTimerRef.current) { clearInterval(prerollTimerRef.current); prerollTimerRef.current = null; }
+            setPrerollVisible(false);
+            setPrerollData(null);
+            const p2 = playerRef.current;
+            if (p2 && !p2.isDisposed()) p2.play();
+          }
+        }, 1000);
+      })
+      .catch(() => { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); });
+  }, []);
+
   const buildPlayer = useCallback((srcIndex: number) => {
     if (!containerRef.current) return;
 
@@ -186,6 +235,17 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     player.on("canplay",  () => setLoading(false));
     player.on("ended",    () => { setPlaying(false); setControlsVisible(true); });
     player.on("error",    () => { setError(true); setLoading(false); });
+
+    // Safety timeout — if the player is still loading after 12 seconds, show error
+    const loadTimeout = setTimeout(() => {
+      if (playerRef.current && !playerRef.current.isDisposed()) {
+        const readyState = (playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null)?.readyState ?? 0;
+        if (readyState < 2) {
+          setError(true);
+          setLoading(false);
+        }
+      }
+    }, 12000);
     player.on("timeupdate", () => {
       const ct = player.currentTime() ?? 0;
       setCurrentTime(ct);
@@ -218,13 +278,29 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     setDuration(0);
 
     playerRef.current = player;
-  }, [sources, poster, resetHide, triggerMidrollAd]);
+
+    // Trigger pre-roll once on first load
+    if (showPrerollRef.current && !prerollShown.current) {
+      prerollShown.current = true;
+      // Wait for the player to be ready before pausing/showing pre-roll
+      player.one("canplay", () => {
+        clearTimeout(loadTimeout);
+        triggerPrerollAd();
+      });
+    }
+    player.one("play", () => clearTimeout(loadTimeout));
+    player.one("error", () => clearTimeout(loadTimeout));
+  }, [sources, poster, resetHide, triggerMidrollAd, triggerPrerollAd]);
 
   useEffect(() => {
     adShown.current = false;
+    prerollShown.current = false;
     if (adTimerRef.current) { clearInterval(adTimerRef.current); adTimerRef.current = null; }
+    if (prerollTimerRef.current) { clearInterval(prerollTimerRef.current); prerollTimerRef.current = null; }
     setAdVisible(false);
     setAdData(null);
+    setPrerollVisible(false);
+    setPrerollData(null);
     buildPlayer(activeIndex);
     return () => {
       if (playerRef.current && !playerRef.current.isDisposed()) {
@@ -232,6 +308,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         playerRef.current = null;
       }
       if (adTimerRef.current) { clearInterval(adTimerRef.current); adTimerRef.current = null; }
+      if (prerollTimerRef.current) { clearInterval(prerollTimerRef.current); prerollTimerRef.current = null; }
       unlockOrientation();
     };
   }, [activeIndex]);
@@ -346,10 +423,19 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     const src = sources[activeIndex];
     if (!src) return;
     setDownloading(true);
-    const url = `/api/proxy/download?url=${encodeURIComponent(src.url)}&type=${src.type}&title=${encodeURIComponent(title || src.label)}`;
+    const safeTitle = (title || src.label).replace(/[^a-z0-9_\-\s]/gi, "_");
+
+    // Telegram stream — use the stream endpoint directly with ?download=1
+    let url: string;
+    if (src.url.startsWith("/api/stream/telegram/")) {
+      url = `${src.url}?download=1`;
+    } else {
+      url = `/api/proxy/download?url=${encodeURIComponent(src.url)}&type=${src.type}&title=${encodeURIComponent(title || src.label)}`;
+    }
+
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${title || src.label}.mp4`;
+    a.download = `${safeTitle}.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -391,6 +477,56 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
           <p className="text-white/40 text-sm font-bold text-center px-8 max-w-xs">
             Couldn't load this source. Try a different quality.
           </p>
+        </div>
+      )}
+
+      {/* PRE-ROLL AD OVERLAY */}
+      {prerollVisible && prerollData && (
+        <div className="absolute inset-0 z-[150] flex flex-col bg-black overflow-hidden">
+          <div className="flex-1 relative overflow-hidden">
+            <AdRenderer ad={prerollData} />
+
+            {/* Top-left: "Ad" badge + label */}
+            <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-black/60 border border-white/10 backdrop-blur-sm rounded-full px-2.5 py-1 pointer-events-none">
+              <Megaphone className="w-3 h-3 text-yellow-400" />
+              <span className="text-yellow-400 text-[9px] font-black uppercase tracking-widest">Pre-roll Ad</span>
+            </div>
+
+            {/* Top-right: skip / countdown pill */}
+            <div className="absolute top-4 right-4 z-10">
+              {prerollSkippable ? (
+                <button
+                  onClick={closePreroll}
+                  data-testid="player-preroll-skip"
+                  className="flex items-center gap-1.5 bg-black/80 border border-white/20 backdrop-blur-md text-white text-[11px] font-black px-3 py-2 rounded-full active:scale-95 transition-all hover:bg-white/15"
+                >
+                  Skip Ad <X className="w-3 h-3" />
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 bg-black/70 border border-white/10 backdrop-blur-md text-white/70 text-[11px] font-black px-3 py-2 rounded-full pointer-events-none select-none">
+                  Skip in {prerollCountdown}s
+                </div>
+              )}
+            </div>
+
+            {/* Bottom-right: countdown ring */}
+            <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
+              <div className="relative w-9 h-9">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2.5" />
+                  <circle
+                    cx="18" cy="18" r="15.9" fill="none"
+                    stroke={prerollSkippable ? "#ef4444" : "rgba(255,255,255,0.4)"}
+                    strokeWidth="2.5"
+                    strokeDasharray={`${(prerollCountdown / 15) * 100} 100`}
+                    strokeLinecap="round"
+                    style={{ transition: "stroke-dasharray 1s linear, stroke 0.3s" }}
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/60 font-black">{prerollCountdown}</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

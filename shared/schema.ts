@@ -29,6 +29,7 @@ export const movies = pgTable("movies", {
   originalLanguage: text("original_language"),
   postedToChannel: boolean("posted_to_channel").default(false),
   status: text("status").default("completed"),
+  streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -45,6 +46,7 @@ export const episodes = pgTable("episodes", {
   fileSize: bigint("file_size", { mode: "number" }),
   airDate: text("air_date"),
   rating: integer("rating").default(0),
+  streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -124,6 +126,9 @@ export const settings = pgTable("settings", {
   urlRotationEnabled: boolean("url_rotation_enabled").default(false),
   adminTelegramUsername: text("admin_telegram_username"),
   supportPackages: jsonb("support_packages").$type<{ name: string; price: string; description: string }[]>().default([]),
+  fsbBaseUrl: text("fsb_base_url"),
+  fsbHashLength: integer("fsb_hash_length").default(6),
+  fsbEnabled: boolean("fsb_enabled").default(false),
 });
 
 // Mascot Settings
