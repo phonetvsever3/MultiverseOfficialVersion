@@ -1,5 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
+import crypto from "crypto";
+import { Readable } from "stream";
 
 declare module "express-session" {
   interface SessionData {
@@ -660,6 +662,74 @@ export async function registerRoutes(
       startBot().catch(console.error);
     }
     res.json(settings);
+  });
+
+  // ── Built-in Telegram File Streaming ─────────────────────────────────────
+  // Public route — hash validates access (no login required)
+  // GET /stream/:fileId?hash=<md5(fileId)[:hashLength]>
+  app.get("/stream/:fileId", async (req: Request, res: Response) => {
+    try {
+      const { fileId } = req.params;
+      const { hash } = req.query as { hash?: string };
+
+      const cfg = await storage.getSettings();
+      const botToken = cfg?.botToken;
+      const hashLength = cfg?.fsbHashLength ?? 6;
+
+      if (!botToken) {
+        return res.status(503).send("Bot token not configured on this server.");
+      }
+
+      // Validate hash — MD5(fileId).substring(0, hashLength)
+      const expectedHash = crypto.createHash("md5").update(fileId).digest("hex").substring(0, hashLength);
+      if (!hash || hash !== expectedHash) {
+        return res.status(403).send("Access denied: invalid or missing hash.");
+      }
+
+      // Ask Telegram for the file's download path
+      const getFileRes = await fetch(
+        `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`
+      );
+      const fileData = (await getFileRes.json()) as any;
+
+      if (!fileData.ok || !fileData.result?.file_path) {
+        return res
+          .status(404)
+          .send(
+            fileData.description ||
+            "File not found. Note: Telegram Bot API only supports files up to 20 MB. Larger files require MTProto (TG-FileStreamBot)."
+          );
+      }
+
+      const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
+
+      // Forward optional Range header from browser (needed for video seeking)
+      const fetchHeaders: Record<string, string> = {};
+      if (req.headers.range) fetchHeaders["Range"] = req.headers.range;
+
+      const tgRes = await fetch(downloadUrl, { headers: fetchHeaders });
+
+      // Set response headers
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Accept-Ranges", "bytes");
+      const ct = tgRes.headers.get("Content-Type");
+      if (ct) res.setHeader("Content-Type", ct);
+      const cl = tgRes.headers.get("Content-Length");
+      if (cl) res.setHeader("Content-Length", cl);
+      const cr = tgRes.headers.get("Content-Range");
+      if (cr) res.setHeader("Content-Range", cr);
+      res.setHeader("Content-Disposition", "inline");
+
+      res.status(req.headers.range ? 206 : tgRes.status);
+
+      if (tgRes.body) {
+        Readable.fromWeb(tgRes.body as any).pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (e: any) {
+      if (!res.headersSent) res.status(500).send(e.message);
+    }
   });
 
   // ── FileStreamBot Routes ──────────────────────────────────────────────────

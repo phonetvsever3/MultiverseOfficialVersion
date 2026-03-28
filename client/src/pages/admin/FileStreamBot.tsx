@@ -7,13 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Loader2, Zap, Search, Link2, LinkIcon, Unlink, ChevronLeft, ChevronRight,
   CheckCircle2, XCircle, ExternalLink, Tv, Film, Edit2, X, Check,
   ChevronDown, ChevronUp, Server, Bot, Settings2, Copy, ArrowRight,
-  AlertCircle, Info,
+  AlertCircle, Info, Globe, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buildFsbUrl } from "@/lib/fsb";
 import { type Settings } from "@shared/schema";
 
 interface FsbMovie {
@@ -41,6 +43,7 @@ interface Episode {
   episodeNumber: number;
   title: string | null;
   streamUrl: string | null;
+  fileId: string | null;
 }
 
 // ── Small helpers ────────────────────────────────────────────────────────────
@@ -363,42 +366,107 @@ function SetupGuide({ settings, onTest, testing, testResult, onClearTest }: {
 
 // ── Inline URL editor ─────────────────────────────────────────────────────────
 
-function InlineEdit({ value, onSave, onClear }: { value: string | null; onSave: (v: string) => void; onClear: () => void }) {
+function InlineEdit({
+  value, onSave, onClear, fileId, fsbBaseUrl, fsbHashLength,
+}: {
+  value: string | null;
+  onSave: (v: string) => void;
+  onClear: () => void;
+  fileId?: string | null;
+  fsbBaseUrl?: string;
+  fsbHashLength?: number;
+}) {
   const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState<"url" | "id">("url");
   const [draft, setDraft] = useState(value || "");
+  const [idDraft, setIdDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const startEdit = () => {
-    setDraft(value || "");
+  const startEdit = (prefillId?: string) => {
+    if (prefillId) {
+      setMode("id");
+      setIdDraft(prefillId);
+    } else {
+      setMode("url");
+      setDraft(value || "");
+    }
     setEditing(true);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
+  const getPreviewUrl = () => {
+    if (!idDraft.trim() || !fsbBaseUrl) return null;
+    return buildFsbUrl(fsbBaseUrl, idDraft.trim(), fsbHashLength ?? 6);
+  };
+
   const save = () => {
-    const trimmed = draft.trim();
-    if (trimmed) onSave(trimmed);
-    else onClear();
+    if (mode === "id") {
+      const preview = getPreviewUrl();
+      if (preview) onSave(preview);
+      else onClear();
+    } else {
+      const trimmed = draft.trim();
+      if (trimmed) onSave(trimmed);
+      else onClear();
+    }
     setEditing(false);
   };
 
   if (editing) {
+    const previewUrl = mode === "id" ? getPreviewUrl() : null;
     return (
-      <div className="flex items-center gap-1.5 w-full">
-        <Input
-          ref={inputRef}
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-          placeholder="https://stream.yourdomain.com/stream/123?hash=abc123"
-          className="h-7 text-xs font-mono flex-1"
-          data-testid="input-stream-url"
-        />
-        <button onClick={save} className="h-7 w-7 flex items-center justify-center rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 transition-colors">
-          <Check className="w-3.5 h-3.5" />
-        </button>
-        <button onClick={() => setEditing(false)} className="h-7 w-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground transition-colors">
-          <X className="w-3.5 h-3.5" />
-        </button>
+      <div className="flex flex-col gap-1.5 w-full">
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1 mb-0.5">
+          <button
+            onClick={() => setMode("url")}
+            className={cn("text-[10px] px-2 py-0.5 rounded font-semibold transition-colors", mode === "url" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground")}
+          >Full URL</button>
+          <button
+            onClick={() => { setMode("id"); if (!idDraft && fileId) setIdDraft(fileId); }}
+            className={cn("text-[10px] px-2 py-0.5 rounded font-semibold transition-colors", mode === "id" ? "bg-blue-500/20 text-blue-400" : "text-muted-foreground hover:text-foreground")}
+          >From ID</button>
+        </div>
+
+        <div className="flex items-center gap-1.5 w-full">
+          {mode === "url" ? (
+            <Input
+              ref={inputRef}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+              placeholder="https://stream.yourdomain.com/stream/123?hash=abc123"
+              className="h-7 text-xs font-mono flex-1"
+              data-testid="input-stream-url"
+            />
+          ) : (
+            <div className="flex-1 flex flex-col gap-1">
+              <Input
+                ref={inputRef}
+                value={idDraft}
+                onChange={e => setIdDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+                placeholder="Enter message ID (e.g. 12345)"
+                className="h-7 text-xs font-mono"
+                data-testid="input-stream-id"
+              />
+              {previewUrl && (
+                <p className="text-[10px] font-mono text-blue-400/70 truncate px-1">
+                  → {previewUrl}
+                </p>
+              )}
+              {!fsbBaseUrl && (
+                <p className="text-[10px] text-yellow-400/70 px-1">Set FSB Base URL in Quick Settings first</p>
+              )}
+            </div>
+          )}
+          <button onClick={save} className="h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 transition-colors">
+            <Check className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => setEditing(false)} className="h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground transition-colors">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     );
   }
@@ -417,22 +485,35 @@ function InlineEdit({ value, onSave, onClear }: { value: string | null; onSave: 
             <ExternalLink className="w-3 h-3 flex-shrink-0" />
             {value.replace(/^https?:\/\//, "").substring(0, 50)}{value.length > 60 ? "…" : ""}
           </a>
-          <button onClick={startEdit} className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">
+          <button onClick={() => startEdit()} className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded hover:bg-white/10 text-muted-foreground hover:text-white transition-colors" title="Edit URL">
             <Edit2 className="w-3 h-3" />
           </button>
-          <button onClick={onClear} className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors">
+          <button onClick={onClear} className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors" title="Remove URL">
             <Unlink className="w-3 h-3" />
           </button>
         </>
       ) : (
-        <button
-          onClick={startEdit}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors group"
-          data-testid="button-add-stream-url"
-        >
-          <LinkIcon className="w-3 h-3 group-hover:text-primary" />
-          <span>Add stream URL</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => startEdit()}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors group"
+            data-testid="button-add-stream-url"
+          >
+            <LinkIcon className="w-3 h-3 group-hover:text-primary" />
+            <span>Add URL</span>
+          </button>
+          {fileId && fsbBaseUrl && (
+            <button
+              onClick={() => startEdit(fileId)}
+              className="flex items-center gap-1 text-[10px] text-blue-400/60 hover:text-blue-400 transition-colors border border-blue-500/20 hover:border-blue-500/40 rounded px-1.5 py-0.5"
+              data-testid="button-from-file-id"
+              title="Generate URL from file ID"
+            >
+              <Zap className="w-2.5 h-2.5" />
+              From ID
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -440,7 +521,13 @@ function InlineEdit({ value, onSave, onClear }: { value: string | null; onSave: 
 
 // ── Episode row ───────────────────────────────────────────────────────────────
 
-function EpisodeRow({ ep, onSave, onClear }: { ep: Episode; onSave: (id: number, url: string) => void; onClear: (id: number) => void }) {
+function EpisodeRow({ ep, onSave, onClear, fsbBaseUrl, fsbHashLength }: {
+  ep: Episode;
+  onSave: (id: number, url: string) => void;
+  onClear: (id: number) => void;
+  fsbBaseUrl?: string;
+  fsbHashLength?: number;
+}) {
   return (
     <div className="flex items-center gap-3 py-2 px-4 border-b border-border/30 last:border-0 hover:bg-muted/10 transition-colors">
       <div className="w-16 text-xs text-muted-foreground font-mono flex-shrink-0">
@@ -455,7 +542,14 @@ function EpisodeRow({ ep, onSave, onClear }: { ep: Episode; onSave: (id: number,
           : <XCircle className="w-3.5 h-3.5 text-muted-foreground/40" />}
       </div>
       <div className="min-w-[260px] max-w-xs">
-        <InlineEdit value={ep.streamUrl} onSave={url => onSave(ep.id, url)} onClear={() => onClear(ep.id)} />
+        <InlineEdit
+          value={ep.streamUrl}
+          onSave={url => onSave(ep.id, url)}
+          onClear={() => onClear(ep.id)}
+          fileId={ep.fileId}
+          fsbBaseUrl={fsbBaseUrl}
+          fsbHashLength={fsbHashLength}
+        />
       </div>
     </div>
   );
@@ -463,7 +557,11 @@ function EpisodeRow({ ep, onSave, onClear }: { ep: Episode; onSave: (id: number,
 
 // ── Series expander ───────────────────────────────────────────────────────────
 
-function SeriesExpander({ movie }: { movie: FsbMovie }) {
+function SeriesExpander({ movie, fsbBaseUrl, fsbHashLength }: {
+  movie: FsbMovie;
+  fsbBaseUrl?: string;
+  fsbHashLength?: number;
+}) {
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
 
@@ -503,6 +601,8 @@ function SeriesExpander({ movie }: { movie: FsbMovie }) {
               ep={ep}
               onSave={(id, url) => saveMut.mutate({ id, url })}
               onClear={id => saveMut.mutate({ id, url: null })}
+              fsbBaseUrl={fsbBaseUrl}
+              fsbHashLength={fsbHashLength}
             />
           ))}
           {eps?.length === 0 && (
@@ -511,6 +611,130 @@ function SeriesExpander({ movie }: { movie: FsbMovie }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── FSB Quick Settings ────────────────────────────────────────────────────────
+
+function FsbQuickSettings({ settings }: { settings: Settings | undefined }) {
+  const { toast } = useToast();
+  const [baseUrl, setBaseUrl] = useState(settings?.fsbBaseUrl || "");
+  const [hashLength, setHashLength] = useState(settings?.fsbHashLength ?? 6);
+  const [enabled, setEnabled] = useState(settings?.fsbEnabled ?? false);
+  const [dirty, setDirty] = useState(false);
+
+  const syncFromSettings = (s: Settings | undefined) => {
+    if (!s) return;
+    setBaseUrl(s.fsbBaseUrl || "");
+    setHashLength(s.fsbHashLength ?? 6);
+    setEnabled(s.fsbEnabled ?? false);
+    setDirty(false);
+  };
+
+  const prevSettings = useRef<Settings | undefined>(undefined);
+  if (settings && settings !== prevSettings.current) {
+    prevSettings.current = settings;
+    syncFromSettings(settings);
+  }
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings", { fsbBaseUrl: baseUrl.trim(), fsbHashLength: hashLength, fsbEnabled: enabled });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      setDirty(false);
+      toast({ title: "FSB settings saved" });
+    },
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  const markDirty = () => setDirty(true);
+
+  const useReplitUrl = () => {
+    const url = window.location.origin;
+    setBaseUrl(url);
+    setDirty(true);
+  };
+
+  return (
+    <Card className="mb-6 border-yellow-500/20 bg-yellow-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Settings2 className="w-4 h-4 text-yellow-400" />
+          FSB Quick Settings
+          {dirty && <Badge variant="outline" className="text-[9px] h-4 text-yellow-400 border-yellow-500/40 ml-auto">Unsaved changes</Badge>}
+        </CardTitle>
+        <CardDescription className="text-xs">Configure FileStreamBot directly — no need to go to Settings.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid sm:grid-cols-[1fr_auto_auto] gap-3 items-end">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">FSB Base URL</label>
+            <div className="flex gap-2">
+              <Input
+                value={baseUrl}
+                onChange={e => { setBaseUrl(e.target.value); markDirty(); }}
+                placeholder="https://your-filestream-bot.example.com"
+                className="font-mono text-xs flex-1"
+                data-testid="input-fsb-base-url-quick"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={useReplitUrl}
+                className="flex-shrink-0 gap-1.5 text-xs h-9 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+                data-testid="button-use-replit-url"
+                title="Auto-fill with this Replit app's URL"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                Use Replit URL
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">The public URL of your FSB instance (no trailing slash).</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Hash Length</label>
+            <Input
+              type="number"
+              min={4}
+              max={32}
+              value={hashLength}
+              onChange={e => { setHashLength(parseInt(e.target.value) || 6); markDirty(); }}
+              className="w-24 text-sm"
+              data-testid="input-fsb-hash-length-quick"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between rounded-xl border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">Enable FileStreamBot</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Show Play buttons for movies with a stream URL</p>
+          </div>
+          <Switch
+            checked={enabled}
+            onCheckedChange={v => { setEnabled(v); markDirty(); }}
+            data-testid="switch-fsb-enabled-quick"
+          />
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            disabled={!dirty || saveMut.isPending}
+            onClick={() => saveMut.mutate()}
+            data-testid="button-save-fsb-settings"
+            className="gap-1.5"
+          >
+            {saveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Save Settings
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -592,6 +816,9 @@ export default function AdminFileStreamBot() {
             testResult={testResult}
             onClearTest={() => setTestResult(null)}
           />
+
+          {/* Quick Settings */}
+          <FsbQuickSettings settings={settings} />
 
           {/* Stats bar */}
           {data && fsbConfigured && (
@@ -691,7 +918,11 @@ export default function AdminFileStreamBot() {
                             <span className="text-[10px] text-muted-foreground">{movie.quality}</span>
                           </div>
                           {movie.type === "series" && (
-                            <SeriesExpander movie={movie} />
+                            <SeriesExpander
+                              movie={movie}
+                              fsbBaseUrl={settings?.fsbBaseUrl ?? ""}
+                              fsbHashLength={settings?.fsbHashLength ?? 6}
+                            />
                           )}
                         </div>
 
@@ -708,6 +939,9 @@ export default function AdminFileStreamBot() {
                             value={movie.streamUrl}
                             onSave={url => saveMut.mutate({ id: movie.id, url })}
                             onClear={() => saveMut.mutate({ id: movie.id, url: null })}
+                            fileId={movie.fileId}
+                            fsbBaseUrl={settings?.fsbBaseUrl ?? ""}
+                            fsbHashLength={settings?.fsbHashLength ?? 6}
                           />
                         </div>
                       </div>
