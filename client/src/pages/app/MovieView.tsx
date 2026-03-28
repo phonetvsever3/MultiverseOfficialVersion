@@ -161,18 +161,7 @@ export default function MovieView() {
   const handleAdComplete = () => {
     setShowAd(false);
     setIsReadyToWatch(true);
-    if (tg) {
-      tg.MainButton.setParams({
-        text: "GET MOVIE ON BOT 📥",
-        color: "#e11d48",
-        text_color: "#ffffff",
-        is_active: true,
-        is_visible: true
-      });
-      tg.MainButton.show();
-      if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-      tg.showAlert("Link Unlocked! Click the button below.");
-    }
+    if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
   };
 
   useEffect(() => {
@@ -334,39 +323,32 @@ export default function MovieView() {
         <div className="w-full max-w-sm space-y-6 px-4">
            {isReadyToWatch ? (
              <div className="space-y-4 animate-in fade-in zoom-in duration-700">
-               <Button 
-                 size="lg" 
+               <Button
+                 size="lg"
                  className="w-full h-20 text-xl font-black bg-green-500 hover:bg-green-600 text-white rounded-[2rem] shadow-[0_20px_60px_rgba(34,197,94,0.4)] flex items-center justify-center gap-4 border-b-8 border-green-950 active:border-b-0 active:translate-y-2 transition-all"
-                 onClick={() => mainButtonHandlerRef.current()}
+                 onClick={() => setLocation(selectedEpisode ? `/app/stream/episode/${selectedEpisode.id}` : `/app/stream/movie/${movieId}`)}
+                 data-testid="button-watch-now"
                >
-                 GET MOVIE ON BOT 📥 <ArrowRight className="w-6 h-6" />
+                 <Play className="w-7 h-7 fill-white" /> Watch Now
                </Button>
-               <div className="flex items-center justify-center gap-2 text-green-500 font-black text-[10px] uppercase tracking-widest bg-green-500/10 py-3 rounded-2xl border border-green-500/20">
-                  <ShieldCheck className="w-4 h-4" /> Link Secured & Ready
-               </div>
+               <button
+                 onClick={() => mainButtonHandlerRef.current()}
+                 className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:bg-white/10 active:scale-95 transition-all"
+                 data-testid="button-get-on-bot"
+               >
+                 <Download className="w-4 h-4" /> Get on Bot instead
+               </button>
              </div>
            ) : (
              movie.type === 'movie' && (
                <div className="flex flex-col gap-4">
-                 {/* Stream Play button — visible when FSB is enabled and a stream URL is set */}
-                 {settings?.fsbEnabled && movie.streamUrl && (
-                   <a
-                     href={movie.streamUrl}
-                     target="_blank"
-                     rel="noopener noreferrer"
-                     data-testid="button-play-stream"
-                     className="w-full h-18 flex items-center justify-center gap-3 text-lg font-black bg-green-500 hover:bg-green-600 text-white rounded-[1.8rem] shadow-2xl shadow-green-500/40 border-b-[6px] border-green-950 active:border-b-0 active:translate-y-1.5 transition-all py-5 select-none"
-                   >
-                     <Play className="w-6 h-6 fill-white" /> Watch Now
-                   </a>
-                 )}
-                 <Button 
-                   size="lg" 
-                   className="w-full h-18 text-lg font-black bg-primary hover:bg-primary/90 text-white rounded-[1.8rem] shadow-2xl shadow-primary/40 relative overflow-hidden group border-b-6 border-black/20"
+                 <Button
+                   size="lg"
+                   className="w-full h-18 text-lg font-black bg-primary hover:bg-primary/90 text-white rounded-[1.8rem] shadow-2xl shadow-primary/40 relative overflow-hidden group border-b-6 border-black/20 py-5"
                    onClick={() => handleDownloadClick()}
-                   data-testid="button-premium-download"
+                   data-testid="button-watch-now-unlock"
                  >
-                   <Download className="w-6 h-6 mr-3 fill-current" /> Premium Download
+                   <Play className="w-6 h-6 mr-3 fill-current" /> Watch Now
                  </Button>
                </div>
              )
@@ -453,27 +435,13 @@ export default function MovieView() {
                         </span>
                       </div>
                       <div className="flex gap-1.5">
-                        {settings?.fsbEnabled && ep.streamUrl && (
-                          <a
-                            href={ep.streamUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            data-testid={`button-play-ep-${ep.id}`}
-                            className="h-8 px-4 text-[10px] font-black text-white bg-green-500 hover:bg-green-600 rounded-full uppercase tracking-tighter flex items-center gap-1.5 transition-colors"
-                          >
-                            <Play className="w-3 h-3 fill-white" /> Play
-                          </a>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 px-4 text-[10px] font-black text-primary hover:bg-primary/10 rounded-full uppercase tracking-tighter"
+                        <button
                           onClick={(e) => { e.stopPropagation(); handleDownloadClick(ep); }}
-                          data-testid={`button-dl-ep-${ep.id}`}
+                          data-testid={`button-play-ep-${ep.id}`}
+                          className="h-8 px-4 text-[10px] font-black text-white bg-primary hover:bg-primary/90 rounded-full uppercase tracking-tighter flex items-center gap-1.5 transition-colors active:scale-95"
                         >
-                          Download
-                        </Button>
+                          <Play className="w-3 h-3 fill-white" /> Watch
+                        </button>
                       </div>
                     </div>
                   </div>

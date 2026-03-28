@@ -32,6 +32,7 @@ import { getCached, setCache, invalidatePrefix, normalizeKey, TTL } from "./cach
 import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } from "./channel";
 import { parseMovieFileName, parseSeriesFileName, autoAddFromFile, autoAddMovieFromFile } from "./auto-add";
 import { runHealthCheck } from "./url-checker";
+import { registerHlsRoutes } from "./hls-stream";
 
 const uploadsDir = path.resolve("public/uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -89,6 +90,9 @@ export async function registerRoutes(
     }
     next();
   });
+  // HLS Streaming routes
+  registerHlsRoutes(app);
+
   // Start the Telegram Bot (Dynamic from DB)
   startBot().catch(console.error);
   
@@ -429,6 +433,12 @@ export async function registerRoutes(
   app.delete('/api/ads/:id', async (req, res) => {
     await storage.deleteAd(Number(req.params.id));
     res.status(204).send();
+  });
+
+  app.get("/api/episodes/:id", async (req, res) => {
+    const episode = await storage.getEpisode(Number(req.params.id));
+    if (!episode) return res.status(404).json({ message: "Episode not found" });
+    res.json(episode);
   });
 
   app.put("/api/episodes/:id", async (req, res) => {

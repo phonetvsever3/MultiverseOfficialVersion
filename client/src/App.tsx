@@ -31,6 +31,7 @@ import Browse from "@/pages/app/Browse";
 import Adult from "@/pages/app/Adult";
 import Football from "@/pages/app/Football";
 import Support from "@/pages/app/Support";
+import Stream from "@/pages/app/Stream";
 
 function useAuth() {
   return useQuery({
@@ -97,6 +98,8 @@ function Router() {
       <Route path="/app/adult" component={Adult} />
       <Route path="/app/football" component={Football} />
       <Route path="/app/support" component={Support} />
+      <Route path="/app/stream/movie/:id" component={Stream} />
+      <Route path="/app/stream/episode/:id" component={Stream} />
 
       {/* Redirect root to admin */}
       <Route path="/">{() => <ProtectedRoute component={AdminDashboard} />}</Route>

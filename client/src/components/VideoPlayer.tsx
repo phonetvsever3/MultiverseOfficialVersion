@@ -38,6 +38,10 @@ function formatTime(s: number) {
 
 function toProxied(src: VideoSource) {
   if (src.type === "hls") {
+    // Local HLS URLs (our own server) — pass directly, no proxy needed
+    if (src.url.startsWith("/")) {
+      return { src: src.url, type: "application/x-mpegURL" };
+    }
     return {
       src: `/api/proxy/stream?url=${encodeURIComponent(src.url)}`,
       type: "application/x-mpegURL",

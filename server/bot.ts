@@ -217,14 +217,25 @@ export async function startBot() {
     for (const m of items.slice(0, 5)) await sendMovieCard(chatId, m);
   }
 
+  function buildStreamWebAppUrl(type: "movie" | "episode", id: number): string | null {
+    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+    if (!domain) return null;
+    return `https://${domain}/app/stream/${type}/${id}`;
+  }
+
   async function handleMovieDownload(chatId: number, id: number) {
     console.log(`[Bot] Delivery request — ID: ${id}, Chat: ${chatId}`);
     const movie = await storage.getMovie(id);
     if (movie && movie.fileId && movie.fileId !== 'placeholder_file_id') {
+      const streamUrl = buildStreamWebAppUrl("movie", movie.id);
+      const inlineKeyboard = streamUrl
+        ? { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url: streamUrl } }]] }
+        : undefined;
       try {
         await botInstance?.sendVideo(chatId, movie.fileId, {
           caption: `✅ *${movie.title}*\nQuality: ${movie.quality}\n\nEnjoy! 📥`,
           parse_mode: 'Markdown',
+          reply_markup: inlineKeyboard,
         });
         await storage.incrementMovieViews(movie.id);
         return;
@@ -233,6 +244,7 @@ export async function startBot() {
           await botInstance?.sendDocument(chatId, movie.fileId, {
             caption: `✅ *${movie.title}*\n\nDelivered as file. 📥`,
             parse_mode: 'Markdown',
+            reply_markup: inlineKeyboard,
           });
           return;
         } catch (e) {}
@@ -243,9 +255,14 @@ export async function startBot() {
     if (episode?.fileId) {
       try {
         const parent = await storage.getMovie(episode.movieId);
+        const streamUrl = buildStreamWebAppUrl("episode", episode.id);
+        const inlineKeyboard = streamUrl
+          ? { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url: streamUrl } }]] }
+          : undefined;
         await botInstance?.sendVideo(chatId, episode.fileId, {
           caption: `✅ *${parent?.title || 'Series'}*\nS${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}\n\nEnjoy! 📥`,
           parse_mode: 'Markdown',
+          reply_markup: inlineKeyboard,
         });
         return;
       } catch (e) {}

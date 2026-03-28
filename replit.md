@@ -11,6 +11,7 @@ CineBot is a Telegram Mini App and Bot platform for managing and distributing mo
 The platform enables administrators to manage a movie library, configure source/backup Telegram channels, run ad campaigns (including fullscreen interstitials), track user analytics, backup data to GitHub, and auto-add movies from filenames via TMDB.
 
 ## Recent Features Added
+- **HLS Streaming** (`server/hls-stream.ts`): Generates M3U8 playlists and proxies 20 MB `.ts` byte-range chunks directly from Telegram's CDN. Routes: `GET /api/hls/movie/:id/playlist.m3u8`, `GET /api/hls/episode/:id/playlist.m3u8`, `GET /api/hls/movie/:id/chunk/:index.ts`, `GET /api/hls/episode/:id/chunk/:index.ts`. The bot's file delivery messages now include a "📺 HLS Stream (M3U8)" inline button so users can open the playlist in any HLS-compatible player.
 - **Support Page** (`/app/support`): New user-facing page with "Talk to Admin" (opens Telegram chat) and "Advertising Info" section showing configurable packages. Users click a package to start a pre-filled Telegram chat with the admin.
 - **Support & Advertising Settings**: Admin Settings page now has a "Support & Advertising" card to set the admin Telegram username and add/remove advertising packages (name, price, description).
 - **Fullscreen Ad Scheduling**: Fullscreen interstitial ads now support Start Date/Time and Expire Date/Time. The `/api/ads/fullscreen` endpoint only returns ads within their active schedule window. Admin panel shows Live/Scheduled/Expired status badges.
