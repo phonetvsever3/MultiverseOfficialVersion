@@ -302,8 +302,34 @@ export async function startBot() {
           return;
         }
       }
+      // ep_ prefix → direct episode delivery (bypasses movie lookup)
+      if (startParam.startsWith('ep_')) {
+        const epId = parseInt(startParam.replace('ep_', ''));
+        if (!isNaN(epId)) {
+          const episode = await storage.getEpisode(epId);
+          if (episode?.fileId) {
+            const parent = await storage.getMovie(episode.movieId);
+            const s = String(episode.seasonNumber ?? 1).padStart(2, '0');
+            const e = String(episode.episodeNumber ?? 1).padStart(2, '0');
+            try {
+              await botInstance?.sendVideo(chatId, episode.fileId, {
+                caption: `✅ *${parent?.title || 'Series'}*\nS${s}E${e}${episode.title ? `: ${episode.title}` : ''}\n\nEnjoy! 📥`,
+                parse_mode: 'Markdown',
+              });
+            } catch {
+              await botInstance?.sendDocument(chatId, episode.fileId, {
+                caption: `✅ *${parent?.title || 'Series'}* S${s}E${e}\n\nDelivered as file. 📥`,
+                parse_mode: 'Markdown',
+              });
+            }
+          } else {
+            await botInstance?.sendMessage(chatId, `❌ Episode not found.`, { reply_markup: await getMainKeyboard() });
+          }
+          return;
+        }
+      }
       // Other prefixes (dl_, watch_, id_, plain number) → direct file delivery
-      const cleanParam = startParam.replace(/^(watch_|dl_|start_|id_|ep_)/, '');
+      const cleanParam = startParam.replace(/^(watch_|dl_|start_|id_)/, '');
       const id = parseInt(cleanParam);
       if (!isNaN(id)) {
         await handleMovieDownload(chatId, id);

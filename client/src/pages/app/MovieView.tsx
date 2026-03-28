@@ -133,12 +133,12 @@ export default function MovieView() {
 
   useEffect(() => {
     mainButtonHandlerRef.current = () => {
-      const idToSend = selectedEpisode ? selectedEpisode.id : movieId;
+      const idToSend = selectedEpisode ? `ep_${selectedEpisode.id}` : movieId;
       const botUsername = "MultiverseMovies_Bot"; 
       const deepLink = `https://t.me/${botUsername}?start=${idToSend}`;
       
       if (tg) {
-        try { tg.sendData(String(idToSend)); } catch (e) {}
+        try { tg.sendData(String(selectedEpisode ? selectedEpisode.id : movieId)); } catch (e) {}
         tg.openTelegramLink(deepLink);
         if (tg.MainButton) {
           tg.MainButton.setParams({ text: "CHECK BOT CHAT ✅", color: "#22c55e", is_active: false });
