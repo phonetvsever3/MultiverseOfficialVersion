@@ -20,6 +20,7 @@ import AdminFootball from "@/pages/admin/Football";
 import AppUrlsPage from "@/pages/admin/AppUrls";
 import UsersPage from "@/pages/admin/Users";
 import LoginPage from "@/pages/admin/Login";
+import EpisodeChecker from "@/pages/admin/EpisodeChecker";
 
 // Mini App Pages
 import MovieView from "@/pages/app/MovieView";
@@ -84,6 +85,7 @@ function Router() {
       <Route path="/admin/football">{() => <ProtectedRoute component={AdminFootball} />}</Route>
       <Route path="/admin/app-urls">{() => <ProtectedRoute component={AppUrlsPage} />}</Route>
       <Route path="/admin/users">{() => <ProtectedRoute component={UsersPage} />}</Route>
+      <Route path="/admin/episode-checker">{() => <ProtectedRoute component={EpisodeChecker} />}</Route>
 
       {/* Mini App Routes */}
       <Route path="/app" component={Home} />

@@ -732,6 +732,108 @@ export async function registerRoutes(
     }
   });
 
+  // Remove duplicate synced files (same fileName, keep newest)
+  app.post("/api/synced-files/remove-duplicates", async (_req, res) => {
+    try {
+      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
+      const seen = new Map<string, number>(); // fileName -> newest id
+      const toDelete: number[] = [];
+      // Sort ascending so we see oldest first
+      const sorted = [...allFiles].sort((a, b) => a.id - b.id);
+      for (const file of sorted) {
+        const key = (file.fileName || "").trim().toLowerCase();
+        if (seen.has(key)) {
+          toDelete.push(seen.get(key)!); // delete the older one
+        }
+        seen.set(key, file.id); // keep replacing with the newest
+      }
+      for (const id of toDelete) {
+        await storage.deleteSyncedFile(id);
+      }
+      res.json({ removed: toDelete.length, message: `Removed ${toDelete.length} duplicate file(s).` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Remove all synced files that are already listed (exist in movies or episodes)
+  app.post("/api/synced-files/remove-listed", async (_req, res) => {
+    try {
+      const result = await db.delete(syncedFiles).where(
+        sql`(
+          EXISTS (SELECT 1 FROM movies WHERE movies.file_unique_id = ${syncedFiles.fileUniqueId})
+          OR EXISTS (SELECT 1 FROM episodes WHERE episodes.file_unique_id = ${syncedFiles.fileUniqueId})
+        )`
+      );
+      const removed = (result as any).rowCount ?? 0;
+      res.json({ removed, message: `Removed ${removed} already-listed file(s) from the queue.` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Restore synced file entries from existing movies and episodes
+  app.post("/api/synced-files/restore-from-library", async (_req, res) => {
+    try {
+      // Get all existing synced file unique IDs to avoid duplicates
+      const existingSynced = await db.select({ fileUniqueId: syncedFiles.fileUniqueId }).from(syncedFiles);
+      const existingIds = new Set(existingSynced.map(f => f.fileUniqueId));
+
+      const toInsert: typeof syncedFiles.$inferInsert[] = [];
+
+      // Restore from movies
+      const allMovies = await db.select().from(movies);
+      for (const movie of allMovies) {
+        if (!movie.fileId || !movie.fileUniqueId) continue;
+        if (existingIds.has(movie.fileUniqueId)) continue;
+        toInsert.push({
+          channelId: "restored",
+          messageId: 0,
+          fileId: movie.fileId,
+          fileUniqueId: movie.fileUniqueId,
+          fileName: `${movie.title}${movie.quality ? ` (${movie.quality})` : ""}.mp4`,
+          fileSize: movie.fileSize,
+          mimeType: "video/mp4",
+        });
+        existingIds.add(movie.fileUniqueId);
+      }
+
+      // Restore from episodes (join with movies for title)
+      const allEpisodes = await db.select().from(episodes);
+      const movieMap = new Map(allMovies.map(m => [m.id, m]));
+      for (const ep of allEpisodes) {
+        if (!ep.fileId || !ep.fileUniqueId) continue;
+        if (existingIds.has(ep.fileUniqueId)) continue;
+        const movie = movieMap.get(ep.movieId);
+        const title = movie?.title ?? "Unknown Series";
+        const s = String(ep.seasonNumber ?? 1).padStart(2, "0");
+        const e = String(ep.episodeNumber ?? 1).padStart(2, "0");
+        toInsert.push({
+          channelId: "restored",
+          messageId: 0,
+          fileId: ep.fileId,
+          fileUniqueId: ep.fileUniqueId,
+          fileName: `${title} S${s}E${e}.mp4`,
+          fileSize: ep.fileSize,
+          mimeType: "video/mp4",
+        });
+        existingIds.add(ep.fileUniqueId);
+      }
+
+      // Insert in batches
+      let restored = 0;
+      const batchSize = 500;
+      for (let i = 0; i < toInsert.length; i += batchSize) {
+        await db.insert(syncedFiles).values(toInsert.slice(i, i + batchSize));
+        restored += Math.min(batchSize, toInsert.length - i);
+      }
+
+      res.json({ restored, message: `Restored ${restored} file(s) from library.` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Bulk auto-add movies AND series from ALL synced files using TMDB
   app.post("/api/synced-files/bulk-auto-add", async (req, res) => {
     try {

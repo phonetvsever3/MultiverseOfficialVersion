@@ -1,6 +1,6 @@
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { FileVideo, Trash2, Database, PlusCircle, CheckCircle2, Download, Film, Sparkles, Tv, Info, Wand2, Search, Globe, Loader2, X, Zap, AlertCircle, Pencil, Check, Copy, ExternalLink, ArrowUpAZ, ArrowDownAZ, Filter, CalendarDays, Hash, ChevronLeft, ChevronRight } from "lucide-react";
+import { FileVideo, Trash2, Database, PlusCircle, CheckCircle2, Download, Film, Sparkles, Tv, Info, Wand2, Search, Globe, Loader2, X, Zap, AlertCircle, Pencil, Check, Copy, ExternalLink, ArrowUpAZ, ArrowDownAZ, Filter, CalendarDays, Hash, ChevronLeft, ChevronRight, Library, LibraryBig, CopyX, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -49,6 +49,7 @@ export default function AdminSyncedFiles() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortAZ, setSortAZ] = useState<"none" | "az" | "za">("none");
+  const [listedFilter, setListedFilter] = useState<"all" | "listed" | "not_listed">("all");
   const [page, setPage] = useState(0);
 
   // Debounce text inputs so we don't hit the API on every keystroke
@@ -56,7 +57,7 @@ export default function AdminSyncedFiles() {
   const dFileId = useDebounce(fileIdSearch, 350);
 
   // Reset page when filters change
-  useEffect(() => { setPage(0); }, [dSearch, dFileId, typeFilter, dateFrom, dateTo, sortAZ]);
+  useEffect(() => { setPage(0); }, [dSearch, dFileId, typeFilter, dateFrom, dateTo, sortAZ, listedFilter]);
 
   // Build query params
   const queryParams = useMemo(() => {
@@ -64,13 +65,14 @@ export default function AdminSyncedFiles() {
     if (dSearch) p.set("search", dSearch);
     if (dFileId) p.set("fileIdSearch", dFileId);
     if (typeFilter !== "all") p.set("type", typeFilter);
+    if (listedFilter !== "all") p.set("listed", listedFilter);
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
     if (sortAZ !== "none") p.set("sort", sortAZ);
     p.set("limit", String(PAGE_SIZE));
     p.set("offset", String(page * PAGE_SIZE));
     return p.toString();
-  }, [dSearch, dFileId, typeFilter, dateFrom, dateTo, sortAZ, page]);
+  }, [dSearch, dFileId, typeFilter, listedFilter, dateFrom, dateTo, sortAZ, page]);
 
   const { data, isLoading, refetch } = useQuery<{ items: any[]; total: number }>({
     queryKey: ["/api/synced-files", queryParams],
@@ -169,6 +171,9 @@ export default function AdminSyncedFiles() {
   const saveEditing = (id: number) => { if (!editingFileName.trim()) return; renameMutation.mutate({ id, fileName: editingFileName.trim() }); };
 
   const [autoAddingId, setAutoAddingId] = useState<number | null>(null);
+  const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
+  const [isRemovingListed, setIsRemovingListed] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<null | { added: number; skipped: number; failed: number; total: number; addedTitles: string[]; errors: string[] }>(null);
   const [showBulkResult, setShowBulkResult] = useState(false);
@@ -180,9 +185,53 @@ export default function AdminSyncedFiles() {
       const res = await fetch("/api/synced-files/bulk-auto-add", { method: "POST" });
       const d = await res.json();
       if (!res.ok) { toast({ title: d.message || "Bulk auto-add failed", variant: "destructive" }); }
-      else { setBulkResult(d); setShowBulkResult(true); queryClient.invalidateQueries({ queryKey: ["/api/movies"] }); queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] }); }
+      else { setBulkResult(d); setShowBulkResult(true); queryClient.invalidateQueries({ queryKey: ["/api/movies"] }); queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] }); if (d.added > 0) setListedFilter("listed"); }
     } catch (err: any) { toast({ title: "Bulk auto-add error: " + err.message, variant: "destructive" }); }
     finally { setIsBulkRunning(false); }
+  };
+
+  const handleRemoveDuplicates = async () => {
+    if (!confirm("This will remove duplicate files (same file name), keeping only the newest. Continue?")) return;
+    setIsRemovingDuplicates(true);
+    try {
+      const res = await fetch("/api/synced-files/remove-duplicates", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) { toast({ title: d.message || "Failed to remove duplicates", variant: "destructive" }); }
+      else {
+        toast({ title: `Removed ${d.removed} duplicate file${d.removed !== 1 ? "s" : ""}` });
+        queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      }
+    } catch (err: any) { toast({ title: "Error: " + err.message, variant: "destructive" }); }
+    finally { setIsRemovingDuplicates(false); }
+  };
+
+  const handleRemoveListed = async () => {
+    if (!confirm("This will remove all files that are already in the library (listed). Continue?")) return;
+    setIsRemovingListed(true);
+    try {
+      const res = await fetch("/api/synced-files/remove-listed", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) { toast({ title: d.message || "Failed", variant: "destructive" }); }
+      else {
+        toast({ title: `Removed ${d.removed} already-listed file${d.removed !== 1 ? "s" : ""} from queue` });
+        queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      }
+    } catch (err: any) { toast({ title: "Error: " + err.message, variant: "destructive" }); }
+    finally { setIsRemovingListed(false); }
+  };
+
+  const handleRestoreFromLibrary = async () => {
+    setIsRestoring(true);
+    try {
+      const res = await fetch("/api/synced-files/restore-from-library", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) { toast({ title: d.message || "Restore failed", variant: "destructive" }); }
+      else {
+        toast({ title: `Restored ${d.restored} file${d.restored !== 1 ? "s" : ""} from library` });
+        queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      }
+    } catch (err: any) { toast({ title: "Error: " + err.message, variant: "destructive" }); }
+    finally { setIsRestoring(false); }
   };
 
   const handleAutoAddMovie = async (file: any) => {
@@ -270,11 +319,11 @@ export default function AdminSyncedFiles() {
     }).catch(() => toast({ title: "Failed to copy", variant: "destructive" }));
   };
 
-  const hasActiveFilters = typeFilter !== "all" || dateFrom || dateTo || sortAZ !== "none" || dSearch || dFileId;
+  const hasActiveFilters = typeFilter !== "all" || listedFilter !== "all" || dateFrom || dateTo || sortAZ !== "none" || dSearch || dFileId;
 
   const clearFilters = () => {
     setSearchQuery(""); setFileIdSearch("");
-    setTypeFilter("all"); setDateFrom(""); setDateTo(""); setSortAZ("none");
+    setTypeFilter("all"); setListedFilter("all"); setDateFrom(""); setDateTo(""); setSortAZ("none");
   };
 
   return (
@@ -322,6 +371,28 @@ export default function AdminSyncedFiles() {
                     {isBulkRunning ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Zap className="w-3 h-3 mr-2" />}
                     {isBulkRunning ? "Processing..." : "Auto Add All"}
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all whitespace-nowrap"
+                    onClick={handleRemoveDuplicates}
+                    disabled={isRemovingDuplicates}
+                    data-testid="button-remove-duplicates"
+                  >
+                    {isRemovingDuplicates ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <CopyX className="w-3 h-3 mr-2" />}
+                    {isRemovingDuplicates ? "Removing..." : "Remove Dupes"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-blue-500/10 hover:text-blue-400 hover:border-blue-500/30 transition-all whitespace-nowrap"
+                    onClick={handleRestoreFromLibrary}
+                    disabled={isRestoring}
+                    data-testid="button-restore-from-library"
+                  >
+                    {isRestoring ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-2" />}
+                    {isRestoring ? "Restoring..." : "Restore Listed"}
+                  </Button>
                   <Button variant="outline" size="sm" className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-primary/10 hover:text-primary transition-all whitespace-nowrap" onClick={() => refetch()}>
                     <Sparkles className="w-3 h-3 mr-2" /> Refresh
                   </Button>
@@ -365,7 +436,7 @@ export default function AdminSyncedFiles() {
                 </div>
               </div>
 
-              {/* Filter row 2: type, date, sort */}
+              {/* Filter row 2: type, listed, date, sort */}
               <div className="flex flex-wrap gap-3 items-center">
                 {/* Type filter */}
                 <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
@@ -379,6 +450,31 @@ export default function AdminSyncedFiles() {
                     <SelectItem value="series">Series</SelectItem>
                   </SelectContent>
                 </Select>
+
+                {/* Listed / Not Listed filter */}
+                <div className="flex rounded-xl border border-border bg-secondary/20 overflow-hidden h-9" data-testid="filter-listed">
+                  <button
+                    onClick={() => setListedFilter("all")}
+                    className={`px-3 text-[10px] font-black uppercase tracking-widest transition-all ${listedFilter === "all" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
+                    data-testid="filter-listed-all"
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setListedFilter("listed")}
+                    className={`px-3 text-[10px] font-black uppercase tracking-widest border-l border-border transition-all flex items-center gap-1.5 ${listedFilter === "listed" ? "bg-green-500 text-white" : "text-muted-foreground hover:text-green-400"}`}
+                    data-testid="filter-listed-yes"
+                  >
+                    <Library className="w-3 h-3" /> Listed
+                  </button>
+                  <button
+                    onClick={() => setListedFilter("not_listed")}
+                    className={`px-3 text-[10px] font-black uppercase tracking-widest border-l border-border transition-all flex items-center gap-1.5 ${listedFilter === "not_listed" ? "bg-orange-500 text-white" : "text-muted-foreground hover:text-orange-400"}`}
+                    data-testid="filter-listed-no"
+                  >
+                    <X className="w-3 h-3" /> Not Listed
+                  </button>
+                </div>
 
                 {/* Date from */}
                 <div className="relative">
@@ -509,6 +605,25 @@ export default function AdminSyncedFiles() {
                               >
                                 <Copy className="w-3 h-3" />
                               </button>
+                            </div>
+
+                            {/* Listed status badge */}
+                            <div className="mt-1.5">
+                              {file.isListed ? (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/15 border border-green-500/30 text-[9px] font-black uppercase tracking-widest text-green-400"
+                                  data-testid={`badge-listed-${file.id}`}
+                                >
+                                  <Library className="w-2.5 h-2.5" /> In Library
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-[9px] font-black uppercase tracking-widest text-orange-400/80"
+                                  data-testid={`badge-not-listed-${file.id}`}
+                                >
+                                  <X className="w-2.5 h-2.5" /> Not Listed
+                                </span>
+                              )}
                             </div>
 
                             {/* Telegram source link */}
