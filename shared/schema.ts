@@ -129,6 +129,13 @@ export const settings = pgTable("settings", {
   fsbBaseUrl: text("fsb_base_url"),
   fsbHashLength: integer("fsb_hash_length").default(6),
   fsbEnabled: boolean("fsb_enabled").default(false),
+  fsbApiId: text("fsb_api_id"),
+  fsbApiHash: text("fsb_api_hash"),
+  fsbBotToken: text("fsb_bot_token"),
+  fsbBinChannel: text("fsb_bin_channel"),
+  fsbPort: integer("fsb_port").default(8000),
+  fsbFqdn: text("fsb_fqdn"),
+  fsbHasSsl: boolean("fsb_has_ssl").default(false),
 });
 
 // Mascot Settings

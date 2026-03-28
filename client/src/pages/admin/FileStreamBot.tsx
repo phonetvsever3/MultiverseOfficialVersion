@@ -11,8 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   Loader2, Zap, Search, Link2, LinkIcon, Unlink, ChevronLeft, ChevronRight,
   CheckCircle2, XCircle, ExternalLink, Tv, Film, Edit2, X, Check,
-  ChevronDown, ChevronUp, Server, Bot, Settings2, Copy, ArrowRight,
-  AlertCircle, Info, Globe, Save,
+  ChevronDown, ChevronUp, Server, Bot, Settings2, Copy,
+  AlertCircle, Globe, Save, Hash, Eye, EyeOff, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildFsbUrl } from "@/lib/fsb";
@@ -46,7 +46,7 @@ interface Episode {
   fileId: string | null;
 }
 
-// ── Small helpers ────────────────────────────────────────────────────────────
+// ── Small helpers ─────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -64,20 +64,56 @@ function CopyButton({ text }: { text: string }) {
 function StepBadge({ n, done }: { n: number; done: boolean }) {
   return (
     <div className={cn(
-      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 border-2 transition-colors",
+      "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 border-2 transition-all",
       done
-        ? "bg-green-500 border-green-500 text-white"
+        ? "bg-green-500 border-green-500 text-white shadow-lg shadow-green-500/20"
         : "bg-transparent border-primary/40 text-primary"
     )}>
-      {done ? <Check className="w-3.5 h-3.5" /> : n}
+      {done ? <Check className="w-4 h-4" /> : n}
     </div>
   );
 }
 
-// ── Setup Guide ──────────────────────────────────────────────────────────────
+// ── Setup Wizard ──────────────────────────────────────────────────────────────
 
-function SetupGuide({ settings, onTest, testing, testResult, onClearTest }: {
+// ── Masked input ──────────────────────────────────────────────────────────────
+
+function MaskedInput({ value, onChange, placeholder, testId }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  testId?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative flex-1">
+      <Input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="font-mono text-xs pr-8"
+        data-testid={testId}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        tabIndex={-1}
+      >
+        {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+}
+
+function SetupWizard({
+  settings, onSaveSettings, saving,
+  onTest, testing, testResult, onClearTest,
+}: {
   settings: Settings | undefined;
+  onSaveSettings: (data: Partial<Settings>) => void;
+  saving: boolean;
   onTest: () => void;
   testing: boolean;
   testResult: { ok: boolean; message: string } | null;
@@ -85,209 +121,380 @@ function SetupGuide({ settings, onTest, testing, testResult, onClearTest }: {
 }) {
   const [open, setOpen] = useState(!settings?.fsbEnabled);
 
-  const step1Done = true; // always available (just needs reading)
+  // Step 2 fields
+  const [baseUrl, setBaseUrl] = useState(settings?.fsbBaseUrl || "");
+  const [hashLength, setHashLength] = useState(settings?.fsbHashLength ?? 6);
+  const [enabled, setEnabled] = useState(settings?.fsbEnabled ?? false);
+  const [step2Dirty, setStep2Dirty] = useState(false);
+
+  // Step 1 .env fields
+  const [apiId, setApiId] = useState(settings?.fsbApiId || "");
+  const [apiHash, setApiHash] = useState(settings?.fsbApiHash || "");
+  const [botToken, setBotToken] = useState(settings?.fsbBotToken || "");
+  const [binChannel, setBinChannel] = useState(settings?.fsbBinChannel || "");
+  const [port, setPort] = useState(String(settings?.fsbPort ?? 8000));
+  const [fqdn, setFqdn] = useState(settings?.fsbFqdn || "");
+  const [hasSsl, setHasSsl] = useState(settings?.fsbHasSsl ?? false);
+  const [envDirty, setEnvDirty] = useState(false);
+  const [showEnvOutput, setShowEnvOutput] = useState(false);
+
+  const prevSettings = useRef<Settings | undefined>(undefined);
+  if (settings && settings !== prevSettings.current) {
+    prevSettings.current = settings;
+    if (!step2Dirty) {
+      setBaseUrl(settings.fsbBaseUrl || "");
+      setHashLength(settings.fsbHashLength ?? 6);
+      setEnabled(settings.fsbEnabled ?? false);
+    }
+    if (!envDirty) {
+      setApiId(settings.fsbApiId || "");
+      setApiHash(settings.fsbApiHash || "");
+      setBotToken(settings.fsbBotToken || "");
+      setBinChannel(settings.fsbBinChannel || "");
+      setPort(String(settings.fsbPort ?? 8000));
+      setFqdn(settings.fsbFqdn || "");
+      setHasSsl(settings.fsbHasSsl ?? false);
+    }
+  }
+
+  const envConfigFilled = !!(apiId && apiHash && botToken && binChannel && fqdn);
+  const step1Done = envConfigFilled;
   const step2Done = !!settings?.fsbBaseUrl;
-  const step3Done = !!settings?.fsbEnabled && testResult?.ok === true;
-  const allDone = step2Done && settings?.fsbEnabled;
+  const step3Done = testResult?.ok === true;
+  const step4Done = step2Done && !!settings?.fsbEnabled;
+  const allDone = step4Done;
+
+  const generatedEnv = `API_ID=${apiId}
+API_HASH=${apiHash}
+BOT_TOKEN=${botToken}
+BIN_CHANNEL=${binChannel}
+PORT=${port}
+FQDN=${fqdn}
+HAS_SSL=${hasSsl ? "True" : "False"}`;
+
+  const handleSaveEnv = () => {
+    onSaveSettings({
+      fsbApiId: apiId.trim(),
+      fsbApiHash: apiHash.trim(),
+      fsbBotToken: botToken.trim(),
+      fsbBinChannel: binChannel.trim(),
+      fsbPort: parseInt(port) || 8000,
+      fsbFqdn: fqdn.trim(),
+      fsbHasSsl: hasSsl,
+    });
+    setEnvDirty(false);
+    setShowEnvOutput(true);
+  };
+
+  const handleSave = () => {
+    onSaveSettings({ fsbBaseUrl: baseUrl.trim(), fsbHashLength: hashLength, fsbEnabled: enabled });
+    setStep2Dirty(false);
+  };
 
   return (
     <Card className={cn("mb-6 border-2 transition-colors", allDone ? "border-green-500/30 bg-green-500/5" : "border-yellow-500/20 bg-yellow-500/5")}>
-      <button
-        className="w-full text-left"
-        onClick={() => setOpen(o => !o)}
-        data-testid="button-toggle-setup-guide"
-      >
+      <button className="w-full text-left" onClick={() => setOpen(o => !o)} data-testid="button-toggle-setup-guide">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-3 text-base">
               {allDone
                 ? <CheckCircle2 className="w-5 h-5 text-green-400" />
                 : <AlertCircle className="w-5 h-5 text-yellow-400" />}
-              {allDone ? "FileStreamBot is configured and active" : "Setup Required — How FileStreamBot Works"}
+              {allDone ? "FileStreamBot is active" : "Setup Guide — Get streaming in 4 steps"}
             </CardTitle>
             {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
           </div>
-          {!open && !allDone && (
-            <p className="text-xs text-muted-foreground ml-8">Click to expand the setup guide</p>
-          )}
-          {!open && allDone && (
+          {!open && (
             <p className="text-xs text-muted-foreground ml-8">
-              Base URL: <code className="font-mono text-primary">{settings?.fsbBaseUrl}</code>
+              {allDone
+                ? <>Base URL: <code className="font-mono text-primary">{settings?.fsbBaseUrl}</code></>
+                : "Click to expand the setup guide"}
             </p>
           )}
         </CardHeader>
       </button>
 
       {open && (
-        <CardContent className="space-y-0 pt-0 pb-6">
+        <CardContent className="pt-0 pb-6 space-y-0">
+          <div className="space-y-0 px-1">
 
-          {/* What is it */}
-          <div className="mb-6 px-1">
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-              <div className="text-xs text-foreground/80 leading-relaxed space-y-1.5">
-                <p><strong className="text-foreground">What is TG-FileStreamBot?</strong></p>
-                <p>
-                  Telegram only allows downloading files up to <strong>20 MB</strong> through the normal bot API. Your movies are much larger (300–900 MB),
-                  so a normal bot can't stream them directly.
-                </p>
-                <p>
-                  <strong>TG-FileStreamBot</strong> is a separate web server you run that connects to Telegram using the <em>MTProto</em> protocol
-                  (the same one Telegram apps use). It can stream <strong>any size file</strong> from Telegram over a normal HTTP URL —
-                  so users can watch directly in a browser without downloading the whole file.
-                </p>
-                <p className="text-muted-foreground">
-                  You need: a server (VPS/cloud) to run it, a Telegram API ID &amp; Hash (free from my.telegram.org), and your bot token.
-                </p>
+            {/* ── Step 1: Deploy + .env Config ── */}
+            <div className="flex gap-4 pb-6">
+              <div className="flex flex-col items-center gap-1">
+                <StepBadge n={1} done={step1Done} />
+                <div className="flex-1 w-px bg-border/40" />
               </div>
-            </div>
-          </div>
-
-          {/* Steps */}
-          <div className="space-y-6 px-1">
-
-            {/* Step 1 */}
-            <div className="flex gap-4">
-              <StepBadge n={1} done={false} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2">
+              <div className="flex-1 min-w-0 pb-2 space-y-4">
+                <div className="flex items-center gap-2">
                   <Server className="w-4 h-4 text-primary" />
-                  <h3 className="font-semibold text-sm text-foreground">Deploy TG-FileStreamBot on a server</h3>
+                  <h3 className="font-semibold text-sm text-foreground">Configure your FSB server credentials</h3>
+                  {step1Done && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Saved</Badge>}
                 </div>
-                <div className="text-xs text-muted-foreground space-y-3 leading-relaxed">
-                  <p>You need a public server (e.g. a cheap VPS like DigitalOcean, Hetzner, or any cloud). The bot must be accessible over the internet.</p>
 
-                  <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-3">
-                    <p className="text-foreground font-semibold text-[11px] uppercase tracking-wider">Quick deploy steps:</p>
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-xs text-foreground/80 leading-relaxed space-y-1.5">
+                  <p><strong className="text-foreground">Why do you need this?</strong></p>
+                  <p>Telegram limits downloads to <strong>20 MB</strong>. TG-FileStreamBot is a separate web server you run that streams any file size over HTTP — no full download needed. Fill in your credentials here, then copy the generated <code className="font-mono">.env</code> to your server.</p>
+                  <p>→ Get your API credentials free at <a href="https://my.telegram.org" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">my.telegram.org</a> → "API development tools"</p>
+                </div>
 
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground/80">① Get your Telegram API credentials (free)</p>
-                      <div className="pl-3 space-y-1 text-muted-foreground">
-                        <p>→ Go to <a href="https://my.telegram.org" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">my.telegram.org</a> → Log in → "API development tools"</p>
-                        <p>→ Create an app — copy your <strong className="text-foreground">API_ID</strong> and <strong className="text-foreground">API_HASH</strong></p>
-                      </div>
+                {/* Editable .env form */}
+                <div className="bg-muted/20 border border-border/50 rounded-xl p-4 space-y-3">
+                  <p className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                    .env Configuration
+                  </p>
+
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">API_ID</label>
+                      <Input
+                        value={apiId}
+                        onChange={e => { setApiId(e.target.value); setEnvDirty(true); }}
+                        placeholder="12345678"
+                        className="font-mono text-xs"
+                        data-testid="input-fsb-api-id"
+                      />
+                      <p className="text-[10px] text-muted-foreground">From my.telegram.org → API development tools</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground/80">② Clone and run FileStreamBot on your server</p>
-                      <div className="pl-3 space-y-2">
-                        <div className="bg-black/40 rounded-lg px-3 py-2 font-mono text-[11px] text-green-400 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span>git clone https://github.com/EverythingSuckz/TG-FileStreamBot</span>
-                            <CopyButton text="git clone https://github.com/EverythingSuckz/TG-FileStreamBot" />
-                          </div>
-                          <div>cd TG-FileStreamBot</div>
-                          <div>cp .env.sample .env</div>
-                          <div>nano .env  <span className="text-white/40"># fill in your values</span></div>
-                          <div>pip install -r requirements.txt</div>
-                          <div>python -m bot</div>
-                        </div>
-                      </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">API_HASH</label>
+                      <MaskedInput
+                        value={apiHash}
+                        onChange={v => { setApiHash(v); setEnvDirty(true); }}
+                        placeholder="abc123def456..."
+                        testId="input-fsb-api-hash"
+                      />
+                      <p className="text-[10px] text-muted-foreground">From my.telegram.org → API development tools</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground/80">③ Required .env variables</p>
-                      <div className="pl-3">
-                        <div className="bg-black/40 rounded-lg px-3 py-2 font-mono text-[11px] space-y-1 text-foreground/80">
-                          <div><span className="text-yellow-400">API_ID</span>=<span className="text-green-400">12345678</span><span className="text-white/30"> # from my.telegram.org</span></div>
-                          <div><span className="text-yellow-400">API_HASH</span>=<span className="text-green-400">abc123...</span><span className="text-white/30"> # from my.telegram.org</span></div>
-                          <div><span className="text-yellow-400">BOT_TOKEN</span>=<span className="text-green-400">123456:ABC...</span><span className="text-white/30"> # your bot token</span></div>
-                          <div><span className="text-yellow-400">BIN_CHANNEL</span>=<span className="text-green-400">-1001234567890</span><span className="text-white/30"> # a private channel ID (bot must be admin)</span></div>
-                          <div><span className="text-yellow-400">PORT</span>=<span className="text-green-400">8000</span></div>
-                          <div><span className="text-yellow-400">FQDN</span>=<span className="text-green-400">your-server-domain.com</span><span className="text-white/30"> # your public IP or domain</span></div>
-                          <div><span className="text-yellow-400">HAS_SSL</span>=<span className="text-green-400">False</span><span className="text-white/30"> # True if you have HTTPS</span></div>
-                        </div>
-                      </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">BOT_TOKEN</label>
+                      <MaskedInput
+                        value={botToken}
+                        onChange={v => { setBotToken(v); setEnvDirty(true); }}
+                        placeholder="123456:ABCdef..."
+                        testId="input-fsb-bot-token"
+                      />
+                      <p className="text-[10px] text-muted-foreground">From @BotFather on Telegram</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground/80">④ Or use Docker (easier)</p>
-                      <div className="pl-3">
-                        <div className="bg-black/40 rounded-lg px-3 py-2 font-mono text-[11px] text-green-400 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span>docker-compose up -d</span>
-                            <CopyButton text="docker-compose up -d" />
-                          </div>
-                        </div>
-                      </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">BIN_CHANNEL</label>
+                      <Input
+                        value={binChannel}
+                        onChange={e => { setBinChannel(e.target.value); setEnvDirty(true); }}
+                        placeholder="-1001234567890"
+                        className="font-mono text-xs"
+                        data-testid="input-fsb-bin-channel"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Private channel ID — bot must be admin</p>
                     </div>
 
-                    <p className="text-muted-foreground text-[11px]">
-                      Once running, your FSB will be accessible at <code className="text-primary font-mono">http://your-server-ip:8000</code> (or your domain if you set up a reverse proxy with HTTPS).
-                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">FQDN</label>
+                      <Input
+                        value={fqdn}
+                        onChange={e => { setFqdn(e.target.value); setEnvDirty(true); }}
+                        placeholder="your-server-domain.com"
+                        className="font-mono text-xs"
+                        data-testid="input-fsb-fqdn"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Your server's public IP or domain</p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-yellow-400">PORT</label>
+                      <Input
+                        type="number"
+                        value={port}
+                        onChange={e => { setPort(e.target.value); setEnvDirty(true); }}
+                        placeholder="8000"
+                        className="font-mono text-xs"
+                        data-testid="input-fsb-port"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Port the FSB server listens on</p>
+                    </div>
                   </div>
 
-                  <a
-                    href="https://github.com/EverythingSuckz/TG-FileStreamBot"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    data-testid="link-fsb-github"
+                  <div className="flex items-center justify-between rounded-lg border border-border/40 bg-background/40 px-3 py-2.5">
+                    <div>
+                      <p className="text-xs font-semibold text-yellow-400">HAS_SSL</p>
+                      <p className="text-[10px] text-muted-foreground">Enable if your server uses HTTPS</p>
+                    </div>
+                    <Switch
+                      checked={hasSsl}
+                      onCheckedChange={v => { setHasSsl(v); setEnvDirty(true); }}
+                      data-testid="switch-fsb-has-ssl"
+                    />
+                  </div>
+
+                  <Button
+                    size="sm"
+                    onClick={handleSaveEnv}
+                    disabled={saving || (!envDirty && step1Done)}
+                    className="gap-1.5 w-full sm:w-auto"
+                    data-testid="button-save-fsb-env"
                   >
-                    <ExternalLink className="w-3 h-3" /> TG-FileStreamBot on GitHub →
-                  </a>
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    Save & Generate .env
+                  </Button>
                 </div>
+
+                {/* Generated .env output */}
+                {(showEnvOutput || step1Done) && envConfigFilled && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-semibold text-green-400 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Your .env file — copy to your server
+                      </p>
+                      <CopyButton text={generatedEnv} />
+                    </div>
+                    <div className="bg-black/50 rounded-xl px-4 py-3 font-mono text-[11px] space-y-1 border border-green-500/20">
+                      {generatedEnv.split("\n").map((line, i) => {
+                        const [key, ...rest] = line.split("=");
+                        return (
+                          <div key={i}>
+                            <span className="text-yellow-400">{key}</span>
+                            <span className="text-white/50">=</span>
+                            <span className="text-green-400">{rest.join("=")}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clone instructions */}
+                <div className="bg-muted/20 rounded-xl border border-border/40 p-4 space-y-3 text-xs">
+                  <p className="font-semibold text-foreground/80">Run on your server:</p>
+                  <div className="bg-black/40 rounded-lg px-3 py-2 font-mono text-[11px] text-green-400 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span>git clone https://github.com/EverythingSuckz/TG-FileStreamBot</span>
+                      <CopyButton text="git clone https://github.com/EverythingSuckz/TG-FileStreamBot" />
+                    </div>
+                    <div>cd TG-FileStreamBot && cp .env.sample .env</div>
+                    <div className="text-white/60"># paste your generated .env content above</div>
+                    <div>pip install -r requirements.txt && python -m bot</div>
+                  </div>
+                  <p className="text-muted-foreground">Or with Docker: <code className="font-mono text-green-400">docker-compose up -d</code> <CopyButton text="docker-compose up -d" /></p>
+                </div>
+
+                <a
+                  href="https://github.com/EverythingSuckz/TG-FileStreamBot"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  data-testid="link-fsb-github"
+                >
+                  <ExternalLink className="w-3 h-3" /> TG-FileStreamBot on GitHub →
+                </a>
               </div>
             </div>
 
-            {/* Divider */}
-            <div className="border-t border-border/30 ml-4" />
-
-            {/* Step 2 */}
-            <div className="flex gap-4">
-              <StepBadge n={2} done={step2Done} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2">
+            {/* ── Step 2: Configure ── */}
+            <div className="flex gap-4 pb-6">
+              <div className="flex flex-col items-center gap-1">
+                <StepBadge n={2} done={step2Done} />
+                <div className="flex-1 w-px bg-border/40" />
+              </div>
+              <div className="flex-1 min-w-0 pb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <Settings2 className="w-4 h-4 text-primary" />
-                  <h3 className="font-semibold text-sm text-foreground">Configure the URL in Settings</h3>
-                  {step2Done && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Done</Badge>}
+                  <h3 className="font-semibold text-sm text-foreground">Enter your FSB URL</h3>
+                  {step2Done && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Saved</Badge>}
                 </div>
-                <div className="text-xs text-muted-foreground space-y-2 leading-relaxed">
-                  <p>Go to <a href="/admin/settings" className="text-primary hover:underline" data-testid="link-to-settings">Admin → Settings → FileStreamBot section</a> and fill in:</p>
-                  <ul className="pl-4 space-y-1 list-disc">
-                    <li><strong className="text-foreground">FSB Base URL</strong> — the public address of your running FSB (e.g. <code className="font-mono text-primary text-[11px]">https://stream.yourdomain.com</code>)</li>
-                    <li><strong className="text-foreground">Hash Length</strong> — leave at <code className="font-mono text-[11px]">6</code> unless you changed it in your FSB config</li>
-                    <li><strong className="text-foreground">Enable FileStreamBot</strong> — toggle ON to show Play buttons to users</li>
-                  </ul>
-                  {!step2Done && (
-                    <a
-                      href="/admin/settings"
-                      className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
-                      data-testid="link-go-settings"
+
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Globe className="w-3 h-3 text-muted-foreground" />
+                      FSB Base URL
+                    </label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={baseUrl}
+                        onChange={e => { setBaseUrl(e.target.value); setStep2Dirty(true); }}
+                        placeholder="https://your-filestream-bot.example.com"
+                        className="font-mono text-xs flex-1"
+                        data-testid="input-fsb-base-url"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setBaseUrl(window.location.origin); setStep2Dirty(true); }}
+                        className="flex-shrink-0 gap-1.5 text-xs h-9 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+                        data-testid="button-use-replit-url"
+                        title="Auto-fill with this app's URL"
+                      >
+                        <Globe className="w-3.5 h-3.5" />
+                        Use this URL
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">The public address of your FSB server — no trailing slash.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Hash className="w-3 h-3 text-muted-foreground" />
+                      Hash Length
+                    </label>
+                    <Input
+                      type="number"
+                      min={4}
+                      max={32}
+                      value={hashLength}
+                      onChange={e => { setHashLength(parseInt(e.target.value) || 6); setStep2Dirty(true); }}
+                      className="w-24 text-sm"
+                      data-testid="input-fsb-hash-length"
+                    />
+                    <p className="text-[11px] text-muted-foreground">Leave at <code className="font-mono">6</code> unless you changed it in your FSB config.</p>
+                  </div>
+
+                  {step2Dirty && (
+                    <Button
+                      size="sm"
+                      onClick={handleSave}
+                      disabled={saving || !baseUrl.trim()}
+                      className="gap-1.5"
+                      data-testid="button-save-fsb-url"
                     >
-                      Open Settings <ArrowRight className="w-3 h-3" />
-                    </a>
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      Save URL
+                    </Button>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Divider */}
-            <div className="border-t border-border/30 ml-4" />
-
-            {/* Step 3 */}
-            <div className="flex gap-4">
-              <StepBadge n={3} done={testResult?.ok === true} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2">
+            {/* ── Step 3: Test ── */}
+            <div className="flex gap-4 pb-6">
+              <div className="flex flex-col items-center gap-1">
+                <StepBadge n={3} done={step3Done} />
+                <div className="flex-1 w-px bg-border/40" />
+              </div>
+              <div className="flex-1 min-w-0 pb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <Zap className="w-4 h-4 text-yellow-400" />
                   <h3 className="font-semibold text-sm text-foreground">Test the connection</h3>
-                  {testResult?.ok && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Reachable</Badge>}
+                  {step3Done && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Reachable</Badge>}
                 </div>
-                <div className="text-xs text-muted-foreground space-y-3">
-                  <p>Click the button to verify your admin dashboard can reach your FileStreamBot server.</p>
+                <div className="space-y-3 text-xs text-muted-foreground">
+                  <p>Verify this dashboard can reach your FileStreamBot server.</p>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={onTest}
                     disabled={testing || !step2Done}
-                    data-testid="button-test-fsb-guide"
-                    className="h-8"
+                    data-testid="button-test-fsb"
+                    className="h-8 gap-1.5"
                   >
-                    {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2 text-yellow-400" />}
-                    Test Connection
+                    {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 text-yellow-400" />}
+                    {testing ? "Testing…" : "Test Connection"}
                   </Button>
-                  {!step2Done && <p className="text-yellow-500/70 text-[11px]">Set the Base URL in Settings first.</p>}
+                  {!step2Done && <p className="text-yellow-500/70 text-[11px]">Save a Base URL in Step 2 first.</p>}
                   {testResult && (
                     <div className={cn(
                       "flex items-center gap-2 px-3 py-2 rounded-lg border text-xs",
@@ -302,54 +509,86 @@ function SetupGuide({ settings, onTest, testing, testResult, onClearTest }: {
               </div>
             </div>
 
-            {/* Divider */}
-            <div className="border-t border-border/30 ml-4" />
-
-            {/* Step 4 */}
+            {/* ── Step 4: Enable + Stream URLs ── */}
             <div className="flex gap-4">
-              <StepBadge n={4} done={false} />
+              <div className="flex flex-col items-center gap-1">
+                <StepBadge n={4} done={step4Done} />
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <Bot className="w-4 h-4 text-primary" />
-                  <h3 className="font-semibold text-sm text-foreground">Get stream URLs for your movies</h3>
+                  <h3 className="font-semibold text-sm text-foreground">Enable & add stream URLs</h3>
+                  {step4Done && <Badge variant="outline" className="text-[9px] h-4 text-green-400 border-green-500/30">Active</Badge>}
                 </div>
-                <div className="text-xs text-muted-foreground space-y-3 leading-relaxed">
-                  <p>For each movie you want to stream, you need its FSB stream URL. Here's how:</p>
 
-                  <div className="space-y-3">
-                    <div className="flex gap-3 items-start p-3 rounded-xl bg-muted/20 border border-border/40">
-                      <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
-                      <div>
-                        <p className="font-medium text-foreground/80 mb-0.5">Forward the file to your FileStreamBot</p>
-                        <p className="text-muted-foreground">Open Telegram → find the movie file in your channel → forward it to your FSB's Telegram bot (the same bot token you configured in FSB).</p>
-                      </div>
+                <div className="space-y-4 text-xs text-muted-foreground">
+                  {/* Enable toggle */}
+                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/10 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Enable FileStreamBot</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Show Play buttons for movies that have a stream URL</p>
                     </div>
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={v => { setEnabled(v); setStep2Dirty(true); }}
+                      data-testid="switch-fsb-enabled"
+                    />
+                  </div>
+                  {step2Dirty && (
+                    <Button
+                      size="sm"
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="gap-1.5"
+                      data-testid="button-save-fsb-enable"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      Save
+                    </Button>
+                  )}
 
-                    <div className="flex gap-3 items-start p-3 rounded-xl bg-muted/20 border border-border/40">
-                      <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
-                      <div>
-                        <p className="font-medium text-foreground/80 mb-0.5">Bot replies with a stream link</p>
-                        <p className="text-muted-foreground">The bot will reply with a URL that looks like:</p>
-                        <div className="mt-1.5 bg-black/30 rounded-lg px-3 py-2 font-mono text-[11px] text-primary flex items-center gap-2">
-                          <span className="truncate">https://stream.yourdomain.com/stream/12345?hash=a1b2c3</span>
-                          <CopyButton text="https://stream.yourdomain.com/stream/12345?hash=a1b2c3" />
+                  {/* How to get stream URLs */}
+                  <div className="space-y-2 pt-1">
+                    <p className="font-medium text-foreground">How to get a stream URL for each movie:</p>
+                    <div className="space-y-2">
+                      {[
+                        {
+                          n: 1,
+                          title: "Forward the file to your FileStreamBot",
+                          body: "Open Telegram → find the movie in your channel → forward it to the bot (the same bot token you used in FSB).",
+                        },
+                        {
+                          n: 2,
+                          title: "Bot replies with a stream link",
+                          body: null,
+                          code: "https://stream.yourdomain.com/stream/12345?hash=a1b2c3",
+                        },
+                        {
+                          n: 3,
+                          title: 'Paste the URL in the table below',
+                          body: 'Find the movie → click "Add URL" → paste → press Enter.',
+                        },
+                      ].map(item => (
+                        <div key={item.n} className="flex gap-3 items-start p-3 rounded-xl bg-muted/20 border border-border/40">
+                          <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{item.n}</span>
+                          <div>
+                            <p className="font-medium text-foreground/80 mb-0.5">{item.title}</p>
+                            {item.body && <p className="text-muted-foreground">{item.body}</p>}
+                            {item.code && (
+                              <div className="mt-1.5 bg-black/30 rounded-lg px-3 py-2 font-mono text-[11px] text-primary flex items-center gap-2">
+                                <span className="truncate">{item.code}</span>
+                                <CopyButton text={item.code} />
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 items-start p-3 rounded-xl bg-muted/20 border border-border/40">
-                      <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
-                      <div>
-                        <p className="font-medium text-foreground/80 mb-0.5">Paste the URL in the table below</p>
-                        <p className="text-muted-foreground">Find the movie in the list below → click <strong className="text-foreground">"Add stream URL"</strong> → paste the URL → press Enter or click the green checkmark.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 items-start p-3 rounded-xl bg-green-500/10 border border-green-500/20">
-                      <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-green-400 mb-0.5">Done! Play button appears automatically</p>
-                        <p className="text-muted-foreground">Once a movie has a stream URL and FSB is enabled, a green <strong className="text-white">▶ Watch Now</strong> button will appear on that movie's page in the Mini App for all users.</p>
+                      ))}
+                      <div className="flex gap-3 items-start p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+                        <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium text-green-400 mb-0.5">Play button appears automatically</p>
+                          <p className="text-muted-foreground">Once a movie has a stream URL and FSB is enabled, a green <strong className="text-white">▶ Watch Now</strong> button appears in the app for all users.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -416,7 +655,6 @@ function InlineEdit({
     const previewUrl = mode === "id" ? getPreviewUrl() : null;
     return (
       <div className="flex flex-col gap-1.5 w-full">
-        {/* Mode toggle */}
         <div className="flex items-center gap-1 mb-0.5">
           <button
             onClick={() => setMode("url")}
@@ -427,7 +665,6 @@ function InlineEdit({
             className={cn("text-[10px] px-2 py-0.5 rounded font-semibold transition-colors", mode === "id" ? "bg-blue-500/20 text-blue-400" : "text-muted-foreground hover:text-foreground")}
           >From ID</button>
         </div>
-
         <div className="flex items-center gap-1.5 w-full">
           {mode === "url" ? (
             <Input
@@ -450,14 +687,8 @@ function InlineEdit({
                 className="h-7 text-xs font-mono"
                 data-testid="input-stream-id"
               />
-              {previewUrl && (
-                <p className="text-[10px] font-mono text-blue-400/70 truncate px-1">
-                  → {previewUrl}
-                </p>
-              )}
-              {!fsbBaseUrl && (
-                <p className="text-[10px] text-yellow-400/70 px-1">Set FSB Base URL in Quick Settings first</p>
-              )}
+              {previewUrl && <p className="text-[10px] font-mono text-blue-400/70 truncate px-1">→ {previewUrl}</p>}
+              {!fsbBaseUrl && <p className="text-[10px] text-yellow-400/70 px-1">Set FSB Base URL in Step 2 first</p>}
             </div>
           )}
           <button onClick={save} className="h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 transition-colors">
@@ -614,130 +845,6 @@ function SeriesExpander({ movie, fsbBaseUrl, fsbHashLength }: {
   );
 }
 
-// ── FSB Quick Settings ────────────────────────────────────────────────────────
-
-function FsbQuickSettings({ settings }: { settings: Settings | undefined }) {
-  const { toast } = useToast();
-  const [baseUrl, setBaseUrl] = useState(settings?.fsbBaseUrl || "");
-  const [hashLength, setHashLength] = useState(settings?.fsbHashLength ?? 6);
-  const [enabled, setEnabled] = useState(settings?.fsbEnabled ?? false);
-  const [dirty, setDirty] = useState(false);
-
-  const syncFromSettings = (s: Settings | undefined) => {
-    if (!s) return;
-    setBaseUrl(s.fsbBaseUrl || "");
-    setHashLength(s.fsbHashLength ?? 6);
-    setEnabled(s.fsbEnabled ?? false);
-    setDirty(false);
-  };
-
-  const prevSettings = useRef<Settings | undefined>(undefined);
-  if (settings && settings !== prevSettings.current) {
-    prevSettings.current = settings;
-    syncFromSettings(settings);
-  }
-
-  const saveMut = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/settings", { fsbBaseUrl: baseUrl.trim(), fsbHashLength: hashLength, fsbEnabled: enabled });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      setDirty(false);
-      toast({ title: "FSB settings saved" });
-    },
-    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
-  });
-
-  const markDirty = () => setDirty(true);
-
-  const useReplitUrl = () => {
-    const url = window.location.origin;
-    setBaseUrl(url);
-    setDirty(true);
-  };
-
-  return (
-    <Card className="mb-6 border-yellow-500/20 bg-yellow-500/5">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Settings2 className="w-4 h-4 text-yellow-400" />
-          FSB Quick Settings
-          {dirty && <Badge variant="outline" className="text-[9px] h-4 text-yellow-400 border-yellow-500/40 ml-auto">Unsaved changes</Badge>}
-        </CardTitle>
-        <CardDescription className="text-xs">Configure FileStreamBot directly — no need to go to Settings.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid sm:grid-cols-[1fr_auto_auto] gap-3 items-end">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">FSB Base URL</label>
-            <div className="flex gap-2">
-              <Input
-                value={baseUrl}
-                onChange={e => { setBaseUrl(e.target.value); markDirty(); }}
-                placeholder="https://your-filestream-bot.example.com"
-                className="font-mono text-xs flex-1"
-                data-testid="input-fsb-base-url-quick"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={useReplitUrl}
-                className="flex-shrink-0 gap-1.5 text-xs h-9 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
-                data-testid="button-use-replit-url"
-                title="Auto-fill with this Replit app's URL"
-              >
-                <Globe className="w-3.5 h-3.5" />
-                Use Replit URL
-              </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">The public URL of your FSB instance (no trailing slash).</p>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">Hash Length</label>
-            <Input
-              type="number"
-              min={4}
-              max={32}
-              value={hashLength}
-              onChange={e => { setHashLength(parseInt(e.target.value) || 6); markDirty(); }}
-              className="w-24 text-sm"
-              data-testid="input-fsb-hash-length-quick"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between rounded-xl border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold">Enable FileStreamBot</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Show Play buttons for movies with a stream URL</p>
-          </div>
-          <Switch
-            checked={enabled}
-            onCheckedChange={v => { setEnabled(v); markDirty(); }}
-            data-testid="switch-fsb-enabled-quick"
-          />
-        </div>
-
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            disabled={!dirty || saveMut.isPending}
-            onClick={() => saveMut.mutate()}
-            data-testid="button-save-fsb-settings"
-            className="gap-1.5"
-          >
-            {saveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Save Settings
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminFileStreamBot() {
@@ -776,6 +883,18 @@ export default function AdminFileStreamBot() {
     }
   };
 
+  const settingsMut = useMutation({
+    mutationFn: async (data: Partial<Settings>) => {
+      const res = await apiRequest("POST", "/api/settings", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      toast({ title: "Settings saved" });
+    },
+    onError: () => toast({ title: "Failed to save settings", variant: "destructive" }),
+  });
+
   const saveMut = useMutation({
     mutationFn: ({ id, url }: { id: number; url: string | null }) =>
       apiRequest("PATCH", `/api/admin/movies/${id}/stream-url`, { streamUrl: url }).then(r => r.json()),
@@ -808,35 +927,42 @@ export default function AdminFileStreamBot() {
             </p>
           </div>
 
-          {/* Setup Guide */}
-          <SetupGuide
+          {/* Setup Wizard */}
+          <SetupWizard
             settings={settings}
+            onSaveSettings={settingsMut.mutate}
+            saving={settingsMut.isPending}
             onTest={handleTest}
             testing={testing}
             testResult={testResult}
             onClearTest={() => setTestResult(null)}
           />
 
-          {/* Quick Settings */}
-          <FsbQuickSettings settings={settings} />
-
           {/* Stats bar */}
           {data && fsbConfigured && (
             <div className="flex items-center gap-6 mb-6 px-5 py-4 rounded-xl border border-border/50 bg-muted/10">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500" />
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                 <span className="text-xs text-muted-foreground">FSB Active</span>
               </div>
               <div className="h-4 border-r border-border/50" />
-              <div className="text-xs"><span className="font-bold text-green-400">{data.total > 0 ? Math.round(data.items.filter(m => m.streamUrl).length / Math.min(data.items.length, data.total) * data.total) : 0}</span> <span className="text-muted-foreground">linked</span></div>
-              <div className="text-xs"><span className="font-bold text-muted-foreground">{data.total}</span> <span className="text-muted-foreground">total movies</span></div>
+              <div className="text-xs">
+                <span className="font-bold text-green-400">
+                  {data.total > 0 ? Math.round(data.items.filter(m => m.streamUrl).length / Math.min(data.items.length, data.total) * data.total) : 0}
+                </span>{" "}
+                <span className="text-muted-foreground">linked</span>
+              </div>
+              <div className="text-xs">
+                <span className="font-bold text-muted-foreground">{data.total}</span>{" "}
+                <span className="text-muted-foreground">total movies</span>
+              </div>
               <div className="ml-auto text-xs text-muted-foreground font-mono">
                 {settings?.fsbBaseUrl?.replace(/^https?:\/\//, "")}
               </div>
             </div>
           )}
 
-          {/* Search & Filter — only shown after setup */}
+          {/* Search & Filter */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -884,18 +1010,15 @@ export default function AdminFileStreamBot() {
                 <div className="text-center py-16 text-muted-foreground text-sm">No movies found.</div>
               ) : (
                 <div>
-                  {/* Header */}
                   <div className="grid grid-cols-[auto_1fr_auto_1fr] gap-4 items-center px-5 py-3 border-b border-border/30 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                     <span className="w-8"></span>
                     <span>Title</span>
                     <span className="w-20 text-center">Linked</span>
                     <span>Stream URL (from FileStreamBot)</span>
                   </div>
-
                   {data?.items.map(movie => (
                     <div key={movie.id} className="border-b border-border/20 last:border-0 hover:bg-muted/5 transition-colors">
                       <div className="grid grid-cols-[auto_1fr_auto_1fr] gap-4 items-start px-5 py-4">
-                        {/* Poster */}
                         <div className="w-8 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0">
                           {movie.posterPath ? (
                             <img
@@ -909,8 +1032,6 @@ export default function AdminFileStreamBot() {
                             </div>
                           )}
                         </div>
-
-                        {/* Title */}
                         <div className="min-w-0">
                           <div className="font-semibold text-sm text-foreground truncate">{movie.title}</div>
                           <div className="flex items-center gap-2 mt-0.5">
@@ -925,15 +1046,11 @@ export default function AdminFileStreamBot() {
                             />
                           )}
                         </div>
-
-                        {/* Status */}
                         <div className="w-20 flex justify-center">
                           {movie.streamUrl
                             ? <CheckCircle2 className="w-5 h-5 text-green-400" />
                             : <XCircle className="w-5 h-5 text-muted-foreground/20" />}
                         </div>
-
-                        {/* Stream URL */}
                         <div className="min-w-0 flex items-center">
                           <InlineEdit
                             value={movie.streamUrl}
@@ -968,6 +1085,7 @@ export default function AdminFileStreamBot() {
               </div>
             </div>
           )}
+
         </div>
       </main>
     </div>
