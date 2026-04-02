@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSettingsSchema, type Settings } from "@shared/schema";
-import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap } from "lucide-react";
+import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap, Database } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -295,6 +295,96 @@ function SplashCard() {
             </div>
           </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DatabaseUrlCard() {
+  const { toast } = useToast();
+  const [newUrl, setNewUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  const { data, refetch } = useQuery<{ url: string; isOverride: boolean }>({
+    queryKey: ["/api/admin/database-url"],
+  });
+
+  const handleSave = async () => {
+    if (!newUrl.trim()) return;
+    setSaving(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/database-url", { databaseUrl: newUrl.trim() });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "Failed");
+      toast({ title: "Database URL saved", description: "Server is restarting with the new database…" });
+      setNewUrl("");
+      setTimeout(() => refetch(), 4000);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setRemoving(true);
+    try {
+      const res = await apiRequest("DELETE", "/api/admin/database-url", undefined);
+      if (!res.ok) throw new Error("Failed to remove override");
+      toast({ title: "Override removed", description: "Server is restarting with the original database…" });
+      setTimeout(() => refetch(), 4000);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <Card className="hover-elevate border-blue-500/30">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="h-5 w-5 text-blue-400" />
+          Database URL
+        </CardTitle>
+        <CardDescription>
+          Switch to a different PostgreSQL database (e.g. point this secondary Replit to the primary's database). The server restarts automatically after saving.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg bg-muted/50 border px-4 py-3 text-sm font-mono text-muted-foreground break-all">
+          <span className="text-xs uppercase text-muted-foreground/60 block mb-1">Current database</span>
+          {data?.url || "Loading…"}
+          {data?.isOverride && (
+            <span className="ml-2 inline-block rounded bg-yellow-500/20 text-yellow-400 text-xs px-2 py-0.5">override active</span>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">New Database URL</label>
+          <Input
+            type="password"
+            value={newUrl}
+            onChange={e => setNewUrl(e.target.value)}
+            placeholder="postgres://user:password@host:5432/dbname"
+            className="font-mono"
+          />
+          <p className="text-xs text-muted-foreground">The server will test the connection before switching.</p>
+        </div>
+
+        <div className="flex gap-3 flex-wrap">
+          <Button onClick={handleSave} disabled={saving || !newUrl.trim()} className="flex items-center gap-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+            Save & Restart
+          </Button>
+          {data?.isOverride && (
+            <Button variant="outline" onClick={handleRemove} disabled={removing} className="flex items-center gap-2 border-red-500/40 text-red-400 hover:bg-red-500/10">
+              {removing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Remove Override & Restart
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -790,6 +880,11 @@ export default function AdminSettings() {
           {/* Intro Video card */}
           <div className="mt-6">
             <IntroCard />
+          </div>
+
+          {/* Database URL card */}
+          <div className="mt-6">
+            <DatabaseUrlCard />
           </div>
         </div>
       </main>

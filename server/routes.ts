@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import crypto from "crypto";
 import { Readable } from "stream";
+import pg from "pg";
 
 declare module "express-session" {
   interface SessionData {
@@ -793,6 +794,43 @@ export async function registerRoutes(
     });
   });
 
+  // Admin: get current database URL (masked)
+  app.get("/api/admin/database-url", requireAdmin, (_req, res) => {
+    const url = process.env.DATABASE_URL || "";
+    const masked = url ? url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:****@") : "";
+    res.json({ url: masked, isOverride: fs.existsSync(path.resolve(".db-override.json")) });
+  });
+
+  // Admin: set a new database URL — writes override file and restarts
+  app.post("/api/admin/database-url", requireAdmin, async (req, res) => {
+    const { databaseUrl } = req.body as { databaseUrl?: string };
+    if (!databaseUrl?.trim()) {
+      return res.status(400).json({ message: "databaseUrl is required" });
+    }
+    // Quick connectivity test before saving
+    const testPool = new pg.Pool({ connectionString: databaseUrl.trim(), connectionTimeoutMillis: 5000 });
+    try {
+      const client = await testPool.connect();
+      client.release();
+      await testPool.end();
+    } catch (err: any) {
+      return res.status(422).json({ message: `Cannot connect to new database: ${err?.message}` });
+    }
+    // Save override file
+    fs.writeFileSync(path.resolve(".db-override.json"), JSON.stringify({ DATABASE_URL: databaseUrl.trim() }, null, 2));
+    res.json({ success: true, message: "Database URL saved. Server is restarting…" });
+    // Restart after responding so the client gets the response
+    setTimeout(() => process.exit(0), 500);
+  });
+
+  // Admin: remove the database URL override (revert to env var)
+  app.delete("/api/admin/database-url", requireAdmin, (_req, res) => {
+    const p = path.resolve(".db-override.json");
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    res.json({ success: true, message: "Override removed. Server is restarting…" });
+    setTimeout(() => process.exit(0), 500);
+  });
+
   // Admin: episode gap checker — find series with missing/un-uploaded episodes
   app.get("/api/admin/episode-gaps", async (_req, res) => {
     try {
@@ -960,7 +998,7 @@ export async function registerRoutes(
       const { hash } = req.query as { hash?: string };
 
       const cfg = await storage.getSettings();
-      const botToken = cfg?.botToken;
+      const botToken = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
       const hashLength = cfg?.fsbHashLength ?? 6;
 
       if (!botToken) {

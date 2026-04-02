@@ -28,11 +28,13 @@ const FALLBACK_KEYBOARD = {
 };
 
 export async function startBot() {
-  const settings = await storage.getSettings();
-  const token = settings?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+  // Bot polling ONLY starts if TELEGRAM_BOT_TOKEN env var is set.
+  // This prevents double-replies when a second Replit shares the same database
+  // but should NOT poll Telegram (it still streams using the token from Settings).
+  const token = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!token) {
-    console.log("[Bot] No Telegram Bot Token found.");
+    console.log("[Bot] TELEGRAM_BOT_TOKEN env var not set — bot polling disabled on this instance.");
     return;
   }
 
