@@ -70,8 +70,7 @@ export default function StreamBackendsPage() {
 
   const manualCheck = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/stream-backends/check", {}),
-    onSuccess: (data: any) => {
-      queryClient.setQueryData(["/api/admin/stream-backends"], data);
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stream-backends"] });
       toast({ title: "Health check complete", description: "All backends have been checked." });
     },
