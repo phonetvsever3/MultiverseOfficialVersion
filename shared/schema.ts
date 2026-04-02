@@ -139,6 +139,7 @@ export const settings = pgTable("settings", {
   introVideoPath: text("intro_video_path"),
   streamEnabled: boolean("stream_enabled").default(true),
   apiKey: text("api_key"),
+  lbEnabled: boolean("lb_enabled").default(false),
 });
 
 // Mascot Settings
@@ -190,8 +191,21 @@ export const appUrls = pgTable("app_urls", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Stream Load Balancer Backends
+export const streamBackends = pgTable("stream_backends", {
+  id: serial("id").primaryKey(),
+  url: text("url").notNull(),
+  label: text("label"),
+  isActive: boolean("is_active").default(true),
+  isHealthy: boolean("is_healthy"),
+  lastChecked: timestamp("last_checked"),
+  requestCount: integer("request_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Schemas
 export const insertAppUrlSchema = createInsertSchema(appUrls).omit({ id: true, createdAt: true, visitCount: true });
+export const insertStreamBackendSchema = createInsertSchema(streamBackends).omit({ id: true, createdAt: true, requestCount: true });
 export const insertMovieSchema = createInsertSchema(movies).omit({ id: true, createdAt: true, views: true, rating: true });
 export const insertEpisodeSchema = createInsertSchema(episodes).omit({ id: true, createdAt: true });
 export const insertChannelSchema = createInsertSchema(channels).omit({ id: true });
@@ -229,3 +243,5 @@ export type ViewLog = typeof viewLogs.$inferSelect;
 export type InsertViewLog = z.infer<typeof insertViewLogSchema>;
 export type AppUrl = typeof appUrls.$inferSelect;
 export type InsertAppUrl = z.infer<typeof insertAppUrlSchema>;
+export type StreamBackend = typeof streamBackends.$inferSelect;
+export type InsertStreamBackend = z.infer<typeof insertStreamBackendSchema>;

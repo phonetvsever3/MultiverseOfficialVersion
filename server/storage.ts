@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs, appUrls,
+  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs, appUrls, streamBackends,
   type Movie, type InsertMovie,
   type Episode, type InsertEpisode,
   type Channel, type SyncedFile, type InsertSyncedFile,
@@ -11,6 +11,7 @@ import {
   type MascotSettings,
   type FootballApiKey, type InsertFootballApiKey,
   type AppUrl, type InsertAppUrl,
+  type StreamBackend, type InsertStreamBackend,
 } from "@shared/schema";
 import { eq, desc, sql, like, ilike, and, gte, lte, inArray, or } from "drizzle-orm";
 
@@ -100,6 +101,15 @@ export interface IStorage {
   deleteAppUrl(id: number): Promise<void>;
   incrementAppUrlVisitCount(id: number): Promise<void>;
   getRandomActiveAppUrl(): Promise<AppUrl | undefined>;
+
+  // Stream Backends (Load Balancer)
+  getStreamBackends(): Promise<StreamBackend[]>;
+  getActiveStreamBackends(): Promise<StreamBackend[]>;
+  createStreamBackend(backend: InsertStreamBackend): Promise<StreamBackend>;
+  updateStreamBackend(id: number, updates: Partial<InsertStreamBackend>): Promise<StreamBackend>;
+  deleteStreamBackend(id: number): Promise<void>;
+  incrementStreamBackendRequestCount(id: number): Promise<void>;
+  updateStreamBackendHealth(id: number, isHealthy: boolean): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -608,6 +618,40 @@ export class DatabaseStorage implements IStorage {
     const active = await db.select().from(appUrls).where(eq(appUrls.isActive, true));
     if (active.length === 0) return undefined;
     return active[Math.floor(Math.random() * active.length)];
+  }
+
+  async getStreamBackends(): Promise<StreamBackend[]> {
+    return await db.select().from(streamBackends).orderBy(streamBackends.id);
+  }
+
+  async getActiveStreamBackends(): Promise<StreamBackend[]> {
+    return await db.select().from(streamBackends).where(eq(streamBackends.isActive, true)).orderBy(streamBackends.id);
+  }
+
+  async createStreamBackend(backend: InsertStreamBackend): Promise<StreamBackend> {
+    const [created] = await db.insert(streamBackends).values(backend).returning();
+    return created;
+  }
+
+  async updateStreamBackend(id: number, updates: Partial<InsertStreamBackend>): Promise<StreamBackend> {
+    const [updated] = await db.update(streamBackends).set(updates).where(eq(streamBackends.id, id)).returning();
+    return updated;
+  }
+
+  async deleteStreamBackend(id: number): Promise<void> {
+    await db.delete(streamBackends).where(eq(streamBackends.id, id));
+  }
+
+  async incrementStreamBackendRequestCount(id: number): Promise<void> {
+    await db.update(streamBackends)
+      .set({ requestCount: sql`request_count + 1` })
+      .where(eq(streamBackends.id, id));
+  }
+
+  async updateStreamBackendHealth(id: number, isHealthy: boolean): Promise<void> {
+    await db.update(streamBackends)
+      .set({ isHealthy, lastChecked: new Date() })
+      .where(eq(streamBackends.id, id));
   }
 }
 

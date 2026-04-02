@@ -35,6 +35,7 @@ import { parseMovieFileName, parseSeriesFileName, autoAddFromFile, autoAddMovieF
 import { runHealthCheck } from "./url-checker";
 import { registerHlsRoutes } from "./hls-stream";
 import { getTgClient, scanChannelMtproto } from "./tg-stream";
+import { registerStreamLbRoutes, initStreamLbHealthCheck, runStreamBackendHealthCheck } from "./stream-lb";
 
 const uploadsDir = path.resolve("public/uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -92,6 +93,10 @@ export async function registerRoutes(
     }
     next();
   });
+  // Stream Load Balancer (must be before HLS routes to intercept first)
+  registerStreamLbRoutes(app);
+  initStreamLbHealthCheck();
+
   // HLS Streaming routes
   registerHlsRoutes(app);
 
@@ -2742,6 +2747,59 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       await storage.deleteAppUrl(id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Stream Load Balancer Backends ──────────────────────────────────────────
+  app.post("/api/admin/stream-backends/check", requireAdmin, async (_req, res) => {
+    try {
+      await runStreamBackendHealthCheck();
+      const backends = await storage.getStreamBackends();
+      res.json(backends);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/admin/stream-backends", requireAdmin, async (_req, res) => {
+    try {
+      const backends = await storage.getStreamBackends();
+      res.json(backends);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/admin/stream-backends", requireAdmin, async (req, res) => {
+    try {
+      const schema = z.object({ url: z.string().url(), label: z.string().optional(), isActive: z.boolean().optional() });
+      const data = schema.parse(req.body);
+      const created = await storage.createStreamBackend(data);
+      res.json(created);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/stream-backends/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const schema = z.object({ url: z.string().url().optional(), label: z.string().optional(), isActive: z.boolean().optional() });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateStreamBackend(id, data);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/stream-backends/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteStreamBackend(id);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
