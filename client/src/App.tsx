@@ -23,6 +23,7 @@ import LoginPage from "@/pages/admin/Login";
 import EpisodeChecker from "@/pages/admin/EpisodeChecker";
 import AdminFileStreamBot from "@/pages/admin/FileStreamBot";
 import StreamBackendsPage from "@/pages/admin/StreamBackends";
+import ServerStatsPage from "@/pages/admin/ServerStats";
 
 // Mini App Pages
 import MovieView from "@/pages/app/MovieView";
@@ -91,6 +92,7 @@ function Router() {
       <Route path="/admin/episode-checker">{() => <ProtectedRoute component={EpisodeChecker} />}</Route>
       <Route path="/admin/file-stream-bot">{() => <ProtectedRoute component={AdminFileStreamBot} />}</Route>
       <Route path="/admin/stream-backends">{() => <ProtectedRoute component={StreamBackendsPage} />}</Route>
+      <Route path="/admin/server-stats">{() => <ProtectedRoute component={ServerStatsPage} />}</Route>
 
       {/* Mini App Routes */}
       <Route path="/app" component={Home} />

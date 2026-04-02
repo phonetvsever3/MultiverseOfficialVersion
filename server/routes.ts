@@ -758,6 +758,26 @@ export async function registerRoutes(
 
   // Admin: live server stats
   let _prevCpu: { idle: number; total: number } | null = null;
+  let _reqCount = 0;
+  let _reqWindow: number[] = [];
+  let _latencyWindow: number[] = [];
+
+  // Middleware to track request rate and latency
+  app.use((req, res, next) => {
+    const start = Date.now();
+    _reqCount++;
+    const now = Date.now();
+    _reqWindow.push(now);
+    // Keep only last 60 seconds
+    _reqWindow = _reqWindow.filter(t => now - t < 60000);
+    res.on("finish", () => {
+      const ms = Date.now() - start;
+      _latencyWindow.push(ms);
+      if (_latencyWindow.length > 200) _latencyWindow.shift();
+    });
+    next();
+  });
+
   function getCpuTick() {
     const cpus = os.cpus();
     let idle = 0, total = 0;
@@ -782,6 +802,17 @@ export async function registerRoutes(
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
     const mem = process.memoryUsage();
+
+    const now = Date.now();
+    _reqWindow = _reqWindow.filter(t => now - t < 60000);
+    const reqPerMin = _reqWindow.length;
+    const avgLatency = _latencyWindow.length > 0
+      ? Math.round(_latencyWindow.reduce((a, b) => a + b, 0) / _latencyWindow.length)
+      : 0;
+    const p95Latency = _latencyWindow.length > 0
+      ? Math.round([..._latencyWindow].sort((a, b) => a - b)[Math.floor(_latencyWindow.length * 0.95)])
+      : 0;
+
     res.json({
       cpu: cpuPercent,
       cpuCores: os.cpus().length,
@@ -796,6 +827,10 @@ export async function registerRoutes(
       platform: os.platform(),
       hostname: os.hostname(),
       loadAvg: os.loadavg().map(v => Math.round(v * 100) / 100),
+      reqPerMin,
+      totalRequests: _reqCount,
+      avgLatency,
+      p95Latency,
     });
   });
 
