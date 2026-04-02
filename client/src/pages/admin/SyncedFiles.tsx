@@ -112,6 +112,49 @@ export default function AdminSyncedFiles() {
     },
   });
 
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const refreshIdsMutation = useMutation({
+    mutationFn: async (id: number) => {
+      setRefreshingId(id);
+      const res = await apiRequest("POST", `/api/synced-files/${id}/refresh-ids`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      if (data.success) {
+        toast({ title: "File IDs refreshed", description: "fileId and fileUniqueId updated from source channel." });
+      } else {
+        toast({ title: data.message || "Refresh failed", variant: "destructive" });
+      }
+    },
+    onError: async (err: any) => {
+      let msg = "Failed to refresh file IDs";
+      try { const d = await err.response?.json?.(); msg = d?.message || msg; } catch {}
+      toast({ title: msg, variant: "destructive" });
+    },
+    onSettled: () => setRefreshingId(null),
+  });
+
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const handleRefreshAllIds = async () => {
+    if (!confirm("This will forward every synced file from its source channel to refresh all file IDs. This may take a while. Continue?")) return;
+    setIsRefreshingAll(true);
+    try {
+      const res = await fetch("/api/synced-files/refresh-all-ids", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) {
+        toast({ title: d.message || "Refresh all failed", variant: "destructive" });
+      } else {
+        toast({ title: `Refreshed ${d.refreshed} file ID${d.refreshed !== 1 ? "s" : ""}${d.failed > 0 ? `, ${d.failed} failed` : ""}`, description: d.failed > 0 ? d.errors?.slice(0, 3).join(", ") : "All file IDs updated from source channel." });
+        queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      }
+    } catch (err: any) {
+      toast({ title: "Error: " + err.message, variant: "destructive" });
+    } finally {
+      setIsRefreshingAll(false);
+    }
+  };
+
   const convertMutation = useMutation({
     mutationFn: async () => {
       if (contentType === "movie") {
@@ -393,6 +436,17 @@ export default function AdminSyncedFiles() {
                     {isRestoring ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-2" />}
                     {isRestoring ? "Restoring..." : "Restore Listed"}
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-blue-500/10 hover:text-blue-400 hover:border-blue-500/30 transition-all whitespace-nowrap"
+                    onClick={handleRefreshAllIds}
+                    disabled={isRefreshingAll}
+                    data-testid="button-refresh-all-ids"
+                  >
+                    {isRefreshingAll ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-2" />}
+                    {isRefreshingAll ? "Refreshing IDs..." : "Refresh All IDs"}
+                  </Button>
                   <Button variant="outline" size="sm" className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-primary/10 hover:text-primary transition-all whitespace-nowrap" onClick={() => refetch()}>
                     <Sparkles className="w-3 h-3 mr-2" /> Refresh
                   </Button>
@@ -667,6 +721,20 @@ export default function AdminSyncedFiles() {
 
                       <TableCell className="text-right p-6">
                         <div className="flex justify-end gap-2 flex-wrap">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white font-black text-[10px] uppercase tracking-widest h-9 px-3 rounded-xl border border-blue-500/20"
+                            disabled={refreshingId === file.id}
+                            onClick={() => refreshIdsMutation.mutate(file.id)}
+                            title="Refresh fileId and fileUniqueId from source channel"
+                            data-testid={`button-refresh-ids-${file.id}`}
+                          >
+                            {refreshingId === file.id
+                              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                              : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}
+                            {refreshingId === file.id ? "Refreshing..." : "Refresh ID"}
+                          </Button>
                           <Button variant="secondary" size="sm" className="bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white font-black text-[10px] uppercase tracking-widest h-9 px-3 rounded-xl border border-green-500/20" disabled={autoAddingId === file.id} onClick={() => handleAutoAddMovie(file)} data-testid={`button-auto-add-${file.id}`}>
                             <Wand2 className="w-3.5 h-3.5 mr-1.5" />
                             {autoAddingId === file.id ? "Adding..." : "Auto Add"}

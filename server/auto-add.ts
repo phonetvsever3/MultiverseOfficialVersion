@@ -28,6 +28,7 @@ export function parseMovieFileName(fileName: string): { title: string; year?: nu
   const qualityKeywords = /\b(480p|720p|1080p|4k|WEB[-\s]?DL|BluRay|BRRip|HDRip|HEVC|x264|x265|AAC|AVC|NF|AMZN|TRUE|Final|Edit|Telugu|Hindi|Tamil|Malayalam|Kannada|English|Dual|Multi)\b.*/i;
   title = title.replace(qualityKeywords, '').trim();
   title = title.replace(/[\[\(].*?[\]\)]/g, '').trim();
+  title = title.replace(/[\[\(\]\)]+/g, ' ').replace(/\s+/g, ' ').trim();
   title = title.replace(/[-_\s]+$/, '').trim();
 
   if (!title) return null;
@@ -122,6 +123,7 @@ export function parseSeriesFileName(fileName: string): {
   const qualityKeywords = /\b(480p|720p|1080p|4k|WEB[-\s]?DL|BluRay|BRRip|HDRip|HEVC|x264|x265|AAC|AVC|NF|AMZN|TRUE|Final|Edit|Telugu|Hindi|Tamil|Malayalam|Kannada|English|Dual|Multi)\b.*/i;
   title = title.replace(qualityKeywords, '').trim();
   title = title.replace(/[\[\(].*?[\]\)]/g, '').trim();
+  title = title.replace(/[\[\(\]\)]+/g, ' ').replace(/\s+/g, ' ').trim();
   title = title.replace(/[-_\s]+$/, '').trim();
 
   // Capitalize words nicely (skip letters after apostrophes)

@@ -12,7 +12,7 @@ import {
   Loader2, Zap, Search, Link2, LinkIcon, Unlink, ChevronLeft, ChevronRight,
   CheckCircle2, XCircle, ExternalLink, Tv, Film, Edit2, X, Check,
   ChevronDown, ChevronUp, Server, Bot, Settings2, Copy,
-  AlertCircle, Globe, Save, Hash, Eye, EyeOff, FileText,
+  AlertCircle, Globe, Save, Hash, Eye, EyeOff, FileText, Power,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildFsbUrl } from "@/lib/fsb";
@@ -937,6 +937,41 @@ export default function AdminFileStreamBot() {
             testResult={testResult}
             onClearTest={() => setTestResult(null)}
           />
+
+          {/* Stream ON/OFF Master Switch */}
+          <Card className="mb-6 border-border/60 bg-card/80">
+            <CardContent className="py-4 px-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                    settings?.streamEnabled !== false ? "bg-green-500/15" : "bg-red-500/15"
+                  )}>
+                    <Power className={cn(
+                      "w-5 h-5",
+                      settings?.streamEnabled !== false ? "text-green-400" : "text-red-400"
+                    )} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground leading-tight">
+                      Streaming {settings?.streamEnabled !== false ? "Enabled" : "Disabled"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {settings?.streamEnabled !== false
+                        ? "Users can play movies and episodes. Toggle off to block all streaming immediately."
+                        : "All streaming is paused. Users will see an unavailable message when trying to watch."}
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={settings?.streamEnabled !== false}
+                  onCheckedChange={(checked) => settingsMut.mutate({ streamEnabled: checked })}
+                  disabled={settingsMut.isPending}
+                  className="flex-shrink-0"
+                />
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Stats bar */}
           {data && fsbConfigured && (

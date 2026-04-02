@@ -1,25 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const SPLASH_KEY = "mv_splash_date";
-
-function getTodayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-export function markSplashShown() {
-  try {
-    localStorage.setItem(SPLASH_KEY, getTodayStr());
-  } catch {}
-}
-
-export function splashShownToday(): boolean {
-  try {
-    return localStorage.getItem(SPLASH_KEY) === getTodayStr();
-  } catch {
-    return false;
-  }
-}
-
 interface Props {
   onDone: () => void;
 }
@@ -46,7 +26,6 @@ export default function SplashScreen({ onDone }: Props) {
 
   const finish = useCallback(() => {
     setFading(true);
-    markSplashShown();
     setTimeout(onDone, 700);
   }, [onDone]);
 
@@ -138,6 +117,12 @@ export default function SplashScreen({ onDone }: Props) {
         muted
         autoPlay
         className="absolute inset-0 w-full h-full object-cover"
+        onError={() => {
+          if (!hasLoopedRef.current) {
+            hasLoopedRef.current = true;
+            setVideoEnded(true);
+          }
+        }}
       />
 
       {/* Cinematic vignette */}

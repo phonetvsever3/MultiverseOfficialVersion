@@ -7,11 +7,8 @@ import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
 import { fullscreenAdShownFor } from "@/lib/ad-session";
-import SplashScreen, { splashShownToday, markSplashShown } from "@/components/SplashScreen";
+import SplashScreen from "@/components/SplashScreen";
 import { getWatchHistoryIds } from "@/lib/watch-history";
-
-// Module-level flag: persists through SPA back/forward navigation, resets on full page reload
-let splashShownThisSession = false;
 
 const tg = (window as any).Telegram?.WebApp;
 const TMDB_IMAGE = "https://image.tmdb.org/t/p/";
@@ -295,33 +292,11 @@ export default function Home() {
   const [showAd, setShowAd] = useState(false);
   const [pendingMovieId, setPendingMovieId] = useState<number | null>(null);
   const [fsAd, setFsAd] = useState<any>(null);
-  // Show splash only once per session (survives back navigation, resets on full reload)
-  const [splash, setSplash] = useState(!splashShownThisSession);
-  const [splashResolved, setSplashResolved] = useState(splashShownThisSession);
-
-  useEffect(() => {
-    // Already shown this session — skip the network call entirely
-    if (splashShownThisSession) return;
-
-    fetch("/api/splash/config")
-      .then((r) => r.json())
-      .then((cfg: { alwaysShow: boolean; hasVideo: boolean }) => {
-        if (cfg.alwaysShow || !splashShownToday()) {
-          setSplash(true);
-        } else {
-          setSplash(false);
-        }
-        setSplashResolved(true);
-      })
-      .catch(() => {
-        setSplash(!splashShownToday());
-        setSplashResolved(true);
-      });
-  }, []);
+  // Always show splash every time Home is loaded
+  const [splash, setSplash] = useState(true);
+  const [splashResolved] = useState(true);
 
   const handleSplashDone = () => {
-    splashShownThisSession = true;
-    markSplashShown();
     setSplash(false);
   };
 

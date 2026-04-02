@@ -336,7 +336,7 @@ export default function MovieView() {
                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:bg-white/10 active:scale-95 transition-all"
                  data-testid="button-get-on-bot"
                >
-                 <Download className="w-4 h-4" /> Get on Bot instead
+                 <Download className="w-4 h-4" /> Download Now
                </button>
              </div>
            ) : (

@@ -317,6 +317,22 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     };
   }, [activeIndex]);
 
+  // Auto fullscreen on mount
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.requestFullscreen) {
+      try { tg.requestFullscreen(); } catch {}
+    } else if (document.fullscreenEnabled && !document.fullscreenElement) {
+      const timer = setTimeout(() => {
+        el.requestFullscreen().catch(() => {});
+        lockLandscape();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
   // Fullscreen change & orientation detection
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);

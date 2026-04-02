@@ -408,6 +408,11 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async updateSyncedFileIds(id: number, fileId: string, fileUniqueId: string): Promise<SyncedFile | undefined> {
+    const [updated] = await db.update(syncedFiles).set({ fileId, fileUniqueId }).where(eq(syncedFiles.id, id)).returning();
+    return updated;
+  }
+
   async getSyncedFileByUniqueId(fileUniqueId: string): Promise<SyncedFile | undefined> {
     const [file] = await db.select().from(syncedFiles).where(eq(syncedFiles.fileUniqueId, fileUniqueId));
     return file;

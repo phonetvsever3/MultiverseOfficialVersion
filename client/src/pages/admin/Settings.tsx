@@ -19,6 +19,128 @@ interface SplashConfig {
   hasVideo: boolean;
 }
 
+function IntroCard() {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: cfg, isLoading: cfgLoading, refetch } = useQuery<{ hasVideo: boolean }>({
+    queryKey: ["/api/intro/config"],
+  });
+
+  const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("video", file);
+      const res = await fetch("/api/admin/intro/upload", { method: "POST", body: form, credentials: "include" });
+      if (!res.ok) throw new Error("Upload failed");
+      await refetch();
+      toast({ title: "Intro video uploaded", description: "Logo intro will play before each stream." });
+    } catch {
+      toast({ title: "Upload failed", variant: "destructive" });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemove = async () => {
+    setRemoving(true);
+    try {
+      const res = await fetch("/api/admin/intro/video", { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Remove failed");
+      await refetch();
+      toast({ title: "Intro video removed", description: "No intro will play before streams." });
+    } catch {
+      toast({ title: "Remove failed", variant: "destructive" });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <Card className="hover-elevate">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Zap className="h-5 w-5 text-primary" />
+          Logo Intro Video
+        </CardTitle>
+        <CardDescription>
+          Upload a short logo/intro video that autoplays before movies or series. Plays every time before a movie or series.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {cfgLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/50 text-sm">
+              <div className={`w-2 h-2 rounded-full ${cfg?.hasVideo ? "bg-green-500" : "bg-muted-foreground"}`} />
+              <span className="text-foreground font-medium">
+                {cfg?.hasVideo ? "Intro video active" : "No intro video set"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/mp4,video/*"
+                className="hidden"
+                onChange={handleUpload}
+                data-testid="input-intro-video"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                data-testid="button-upload-intro"
+                className="flex-1"
+              >
+                {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                {uploading ? "Uploading..." : "Upload Intro Video"}
+              </Button>
+
+              {cfg?.hasVideo && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  onClick={handleRemove}
+                  disabled={removing}
+                  data-testid="button-remove-intro"
+                  title="Remove intro video"
+                >
+                  {removing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => refetch()}
+                data-testid="button-refresh-intro"
+                title="Refresh status"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SplashCard() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -204,6 +326,7 @@ export default function AdminSettings() {
       fsbEnabled: settings?.fsbEnabled ?? false,
       fsbBaseUrl: settings?.fsbBaseUrl || "",
       fsbHashLength: settings?.fsbHashLength ?? 6,
+      apiKey: settings?.apiKey || "",
     }
   });
 
@@ -223,6 +346,7 @@ export default function AdminSettings() {
         fsbEnabled: settings.fsbEnabled ?? false,
         fsbBaseUrl: settings.fsbBaseUrl || "",
         fsbHashLength: settings.fsbHashLength ?? 6,
+        apiKey: settings.apiKey || "",
       });
       setPackages(settings.supportPackages || []);
     }
@@ -315,6 +439,33 @@ export default function AdminSettings() {
                         <FormLabel>TMDB API Key (v3)</FormLabel>
                         <FormControl>
                           <Input {...field} type="password" placeholder="Enter your TMDB API key" className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="hover-elevate">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Key className="h-5 w-5 text-yellow-400" />
+                    Bot API Key
+                  </CardTitle>
+                  <CardDescription>
+                    Secure the <code className="text-xs bg-muted px-1 py-0.5 rounded">POST /getMovie</code> endpoint used by external bots or workers. Leave blank to allow unauthenticated access.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="apiKey"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>API Key (x-api-key header)</FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value ?? ""} type="password" placeholder="e.g. SECRET123" className="font-mono" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -634,6 +785,11 @@ export default function AdminSettings() {
           {/* Splash Screen card is outside the main form since it manages its own state */}
           <div className="mt-6">
             <SplashCard />
+          </div>
+
+          {/* Intro Video card */}
+          <div className="mt-6">
+            <IntroCard />
           </div>
         </div>
       </main>

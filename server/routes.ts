@@ -33,6 +33,7 @@ import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } 
 import { parseMovieFileName, parseSeriesFileName, autoAddFromFile, autoAddMovieFromFile } from "./auto-add";
 import { runHealthCheck } from "./url-checker";
 import { registerHlsRoutes } from "./hls-stream";
+import { getTgClient, scanChannelMtproto } from "./tg-stream";
 
 const uploadsDir = path.resolve("public/uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -173,6 +174,42 @@ export async function registerRoutes(
     setCache(cacheKey, movie, TTL.SINGLE);
     res.setHeader("Cache-Control", `public, max-age=${TTL.SINGLE / 1000}`);
     res.json(movie);
+  });
+
+  // POST /getMovie — Bot API: look up a movie's fileId by database ID
+  // Secured with x-api-key header (set via dashboard Settings → API Key)
+  app.post("/getMovie", async (req: Request, res: Response) => {
+    try {
+      const cfg = await storage.getSettings();
+      const configuredKey = cfg?.apiKey?.trim();
+      if (configuredKey) {
+        const provided = (req.headers["x-api-key"] as string | undefined)?.trim();
+        if (provided !== configuredKey) {
+          return res.status(401).json({ success: false, error: "Invalid API key" });
+        }
+      }
+
+      const { userId, movieId } = req.body as { userId?: unknown; movieId?: unknown };
+      if (!movieId) {
+        return res.status(400).json({ success: false, error: "movieId is required" });
+      }
+
+      const id = Number(movieId);
+      if (isNaN(id)) {
+        return res.status(400).json({ success: false, error: "movieId must be a number" });
+      }
+
+      const movie = await storage.getMovie(id);
+      if (!movie || !movie.fileId) {
+        return res.status(404).json({ success: false, error: "Movie not found" });
+      }
+
+      console.log(`[getMovie] userId=${userId} movieId=${id} fileId=${movie.fileId}`);
+      return res.json({ success: true, fileId: movie.fileId, name: movie.title });
+    } catch (err) {
+      console.error("[getMovie] Error:", err);
+      return res.status(500).json({ success: false, error: "Internal server error" });
+    }
   });
 
   app.post(api.movies.create.path, async (req, res) => {
@@ -393,6 +430,246 @@ export async function registerRoutes(
   app.delete(api.channels.delete.path, async (req, res) => {
     await storage.deleteChannel(Number(req.params.id));
     res.status(204).send();
+  });
+
+  // ── Channel history scan ────────────────────────────────────────────────────
+  // In-memory progress tracker (resets on restart)
+  const scanProgress: Record<number, { status: "running" | "done" | "error"; added: number; skipped: number; failed: number; total: number; currentId: number; maxId: number; errors: string[]; message?: string; hint?: string; botUsername?: string }> = {};
+
+  app.get("/api/channels/:id/scan-progress", (req, res) => {
+    const id = parseInt(req.params.id);
+    res.json(scanProgress[id] || null);
+  });
+
+  app.post("/api/channels/:id/scan-history", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid channel ID" });
+
+    const channel = await storage.getChannels().then(list => list.find(c => c.id === id));
+    if (!channel) return res.status(404).json({ message: "Channel not found" });
+
+    const cfg = await storage.getSettings();
+    const token = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return res.status(503).json({ message: "Bot token not configured" });
+
+    const binChannel = cfg?.fsbBinChannel;
+    if (!binChannel) return res.status(422).json({ message: "FSB Bin Channel is not configured in FileStreamBot settings." });
+
+    if (scanProgress[id]?.status === "running") {
+      return res.json({ status: "already_running", ...scanProgress[id] });
+    }
+
+    // Respond immediately — scan runs in the background
+    scanProgress[id] = { status: "running", added: 0, skipped: 0, failed: 0, total: 0, currentId: 0, maxId: 0, errors: [] };
+    res.json({ status: "started", message: "Channel history scan started in background." });
+
+    // ── Pure Bot API sequential scan ──────────────────────────────────────────
+    (async () => {
+      const prog = scanProgress[id];
+      try {
+        const apiBase = `https://api.telegram.org/bot${token}`;
+
+        // Resolve bot username for helpful error messages
+        let botUsername = "";
+        try {
+          const meRes = await fetch(`${apiBase}/getMe`);
+          const meData = await meRes.json();
+          if (meData.ok) botUsername = `@${meData.result.username || meData.result.first_name}`;
+        } catch {}
+        prog.botUsername = botUsername;
+
+        // Normalise stored telegramId → always "-100{channelId}" for Bot API
+        const rawChannelId = channel.telegramId
+          .replace(/^-100/, "")
+          .replace(/^-/, "");
+        const botApiId = `-100${rawChannelId}`;
+
+        // Use the highest known message ID as the scan ceiling.
+        // Accept optional override from query param: ?maxMsgId=5000
+        const overrideMax = req.query?.maxMsgId ? parseInt(req.query.maxMsgId as string) : 0;
+        const maxMsgId = overrideMax > 0
+          ? overrideMax
+          : (channel.lastMessageId && channel.lastMessageId > 0 ? channel.lastMessageId : 5000);
+
+        let scanned = 0;
+        prog.maxId = maxMsgId;
+
+        console.log(`[scan-history] "${channel.name}": scanning IDs 1 → ${maxMsgId}`);
+
+        // Scan UPWARD (1 → maxMsgId) so we never skip low-ID messages.
+        // Structure:
+        //  - Forward attempt is isolated; network errors skip the ID silently.
+        //  - isFatal errors throw to the outer catch → aborts the entire scan.
+        //  - prog.failed ONLY counts failures to save a found document (DB errors).
+        //  - Deleted / service / non-document messages are silently skipped.
+        for (let msgId = 1; msgId <= maxMsgId; msgId++) {
+          scanned++;
+          prog.currentId = msgId;
+
+          // ── 1. Forward the message ─────────────────────────────────────────
+          let fwdData: any = null;
+          try {
+            const fwdRes = await fetch(`${apiBase}/forwardMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: binChannel,
+                from_chat_id: botApiId,
+                message_id: msgId,
+                disable_notification: true,
+              }),
+            });
+            fwdData = await fwdRes.json();
+          } catch {
+            // Pure network error — skip this ID, try the next
+            await new Promise(r => setTimeout(r, 200));
+            continue;
+          }
+
+          if (!fwdData.ok) {
+            // Rate-limited — wait and retry the same ID
+            if (fwdData.error_code === 429) {
+              const wait = ((fwdData.parameters?.retry_after as number) || 5) * 1000;
+              await new Promise(r => setTimeout(r, wait));
+              msgId--;
+              continue;
+            }
+            // Fatal Bot API access error → try MTProto fallback scan
+            const desc = (fwdData.description || "").toLowerCase();
+            if (
+              desc.includes("chat not found") ||
+              desc.includes("peer_id_invalid") ||
+              desc.includes("channel_private") ||
+              desc.includes("bot was kicked")
+            ) {
+              console.log(`[scan-history] Bot API access failed: "${fwdData.description}". Attempting MTProto fallback...`);
+              const apiId = cfg?.fsbApiId?.trim();
+              const apiHash = cfg?.fsbApiHash?.trim();
+              if (!apiId || !apiHash || isNaN(parseInt(apiId, 10))) {
+                prog.hint = "add_bot_as_admin";
+                throw new Error(
+                  `Cannot access channel. The easiest fix: add ${botUsername || "the bot"} as an admin to the channel, then run Scan History again. ` +
+                  `(Bot API: "${fwdData.description}")`
+                );
+              }
+              // Try FSB bot token first, fall back to main bot token
+              const tokensToTry = [cfg?.fsbBotToken?.trim(), token.trim()].filter(Boolean) as string[];
+              // Deduplicate in case they are the same
+              const uniqueTokens = [...new Set(tokensToTry)];
+              let client: any = null;
+              let lastMtError = "";
+              for (const tok of uniqueTokens) {
+                try {
+                  console.log(`[scan-history] Trying MTProto with token ending …${tok.slice(-6)}`);
+                  client = await getTgClient(apiId, apiHash, tok);
+                  break;
+                } catch (mtErr: any) {
+                  lastMtError = mtErr.message;
+                  console.warn(`[scan-history] MTProto attempt failed: ${mtErr.message}`);
+                }
+              }
+              if (!client) {
+                prog.hint = "add_bot_as_admin";
+                throw new Error(
+                  `Cannot access channel. The easiest fix: add ${botUsername || "the bot"} as an admin to the channel, then run Scan History again. ` +
+                  `(Bot API: "${fwdData.description}". MTProto also failed: ${lastMtError})`
+                );
+              }
+              // Switch to MTProto scan — pass 0 so it auto-detects the real max message ID
+              prog.message = "MTProto fallback: detecting channel history size...";
+              await scanChannelMtproto(
+                client,
+                botApiId,
+                0,
+                async (fileInfo) => {
+                  prog.currentId = fileInfo.messageId;
+                  prog.total++;
+                  try {
+                    const existing = await storage.getSyncedFileByUniqueId(fileInfo.fileUniqueId);
+                    if (existing) { prog.skipped++; return; }
+                    const syncedFile = await storage.createSyncedFile({
+                      channelId: botApiId,
+                      messageId: fileInfo.messageId,
+                      fileId: fileInfo.fileId,
+                      fileUniqueId: fileInfo.fileUniqueId,
+                      fileName: fileInfo.fileName,
+                      fileSize: fileInfo.fileSize,
+                      mimeType: fileInfo.mimeType,
+                    });
+                    prog.added++;
+                    const { autoAddFromFile } = await import("./auto-add");
+                    autoAddFromFile(syncedFile).catch(() => {});
+                  } catch (dbErr: any) {
+                    prog.failed++;
+                    if (prog.errors.length < 20) prog.errors.push(`Msg ${fileInfo.messageId}: ${dbErr.message}`);
+                  }
+                },
+                (current, max) => { prog.currentId = current; prog.maxId = max; }
+              );
+              // MTProto scan completed — exit the Bot API loop
+              break;
+            }
+            // Deleted / service / non-forwardable message — silently skip
+            await new Promise(r => setTimeout(r, 100));
+            continue;
+          }
+
+          // ── 2. Inspect forwarded message ───────────────────────────────────
+          const fwdMsg = fwdData.result;
+          if (!fwdMsg) { await new Promise(r => setTimeout(r, 100)); continue; }
+
+          // Always delete the forwarded copy (fire-and-forget)
+          fetch(`${apiBase}/deleteMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: binChannel, message_id: fwdMsg.message_id }),
+          }).catch(() => {});
+
+          const fwdDoc = fwdMsg.document || fwdMsg.video || fwdMsg.audio || fwdMsg.animation;
+
+          // Not a document — skip without counting as failure
+          if (!fwdDoc?.file_id) { await new Promise(r => setTimeout(r, 100)); continue; }
+
+          // ── 3. Save the document (failures here are real failures) ──────────
+          prog.total++;
+          try {
+            const existing = await storage.getSyncedFileByUniqueId(fwdDoc.file_unique_id);
+            if (existing) { prog.skipped++; continue; }
+
+            const fileName = fwdDoc.file_name || fwdMsg.caption || `File_${msgId}`;
+            const syncedFile = await storage.createSyncedFile({
+              channelId: botApiId,
+              messageId: msgId,
+              fileId: fwdDoc.file_id,
+              fileUniqueId: fwdDoc.file_unique_id,
+              fileName,
+              fileSize: fwdDoc.file_size || 0,
+              mimeType: fwdDoc.mime_type || "application/octet-stream",
+            });
+            prog.added++;
+
+            const { autoAddFromFile } = await import("./auto-add");
+            autoAddFromFile(syncedFile).catch(() => {});
+          } catch (dbErr: any) {
+            // Only real failures: could not save a found document
+            prog.failed++;
+            if (prog.errors.length < 20) prog.errors.push(`Msg ${msgId}: ${dbErr.message}`);
+          }
+
+          // ~10 req/s — stays well under Telegram Bot API flood limits
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        const finalMsg = prog.message || `Scan complete: ${prog.added} added, ${prog.skipped} skipped, ${prog.failed} failed. (${scanned} IDs checked)`;
+        prog.status = "done";
+        prog.message = finalMsg;
+        console.log(`[scan-history] "${channel.name}": ${finalMsg}`);
+      } catch (err: any) {
+        prog.status = "error";
+        prog.message = err.message;
+        console.error("[scan-history] Error:", err);
+      }
+    })();
   });
 
   // Ads
@@ -889,6 +1166,143 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  // Refresh fileId + fileUniqueId from source channel via Bot API forwardMessage
+  app.post("/api/synced-files/:id/refresh-ids", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+      const file = await storage.getSyncedFileById(id);
+      if (!file) return res.status(404).json({ message: "File not found" });
+
+      const cfg = await storage.getSettings();
+      const token = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return res.status(503).json({ message: "Bot token not configured" });
+
+      const binChannel = cfg?.fsbBinChannel;
+      if (!binChannel) {
+        return res.status(422).json({ message: "FSB Bin Channel is not configured. Please set it in FileStreamBot settings so the bot has a channel to use for refreshing file IDs." });
+      }
+
+      if (!file.channelId || !file.messageId) {
+        return res.status(422).json({ message: "File has no source channel/message info — cannot refresh from source." });
+      }
+
+      const apiBase = `https://api.telegram.org/bot${token}`;
+
+      // Forward the original message from source channel to bin channel.
+      // This uses the permanent channelId + messageId (never expire) to get a fresh file_id.
+      const fwdRes = await fetch(`${apiBase}/forwardMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: binChannel,
+          from_chat_id: file.channelId,
+          message_id: file.messageId,
+          disable_notification: true,
+        }),
+      });
+      const fwdData: any = await fwdRes.json();
+      if (!fwdData.ok) {
+        return res.status(502).json({ message: `Telegram forwardMessage failed: ${fwdData.description || JSON.stringify(fwdData)}` });
+      }
+
+      const fwdMsg = fwdData.result;
+      const doc = fwdMsg.document || fwdMsg.video || fwdMsg.audio || fwdMsg.animation;
+      if (!doc?.file_id) {
+        return res.status(422).json({ message: "Forwarded message has no document — cannot extract file ID." });
+      }
+
+      const freshFileId: string = doc.file_id;
+      const freshFileUniqueId: string = doc.file_unique_id;
+
+      // Delete the forwarded copy (best-effort cleanup)
+      fetch(`${apiBase}/deleteMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: binChannel, message_id: fwdMsg.message_id }),
+      }).catch(() => {});
+
+      const updated = await storage.updateSyncedFileIds(id, freshFileId, freshFileUniqueId);
+      res.json({ success: true, file: updated });
+    } catch (err: any) {
+      console.error("[refresh-ids]", err);
+      res.status(500).json({ message: err?.message || "Failed to refresh file IDs" });
+    }
+  });
+
+  // Bulk refresh all synced file IDs from source channel via Bot API forwardMessage
+  app.post("/api/synced-files/refresh-all-ids", async (req, res) => {
+    try {
+      const cfg = await storage.getSettings();
+      const token = cfg?.botToken || process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return res.status(503).json({ message: "Bot token not configured" });
+
+      const binChannel = cfg?.fsbBinChannel;
+      if (!binChannel) {
+        return res.status(422).json({ message: "FSB Bin Channel is not configured. Please set it in FileStreamBot settings." });
+      }
+
+      const apiBase = `https://api.telegram.org/bot${token}`;
+
+      // Fetch all synced files
+      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
+      let success = 0;
+      let failed = 0;
+      const errors: string[] = [];
+
+      for (const file of allFiles) {
+        try {
+          if (!file.channelId || !file.messageId) {
+            failed++;
+            errors.push(`#${file.id}: No source channel/message info`);
+            continue;
+          }
+          // Forward from source channel using permanent channelId + messageId
+          const fwdRes = await fetch(`${apiBase}/forwardMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: binChannel,
+              from_chat_id: file.channelId,
+              message_id: file.messageId,
+              disable_notification: true,
+            }),
+          });
+          const fwdData: any = await fwdRes.json();
+          if (!fwdData.ok) {
+            failed++;
+            errors.push(`#${file.id}: ${fwdData.description}`);
+            continue;
+          }
+          const fwdMsg = fwdData.result;
+          const doc = fwdMsg.document || fwdMsg.video || fwdMsg.audio || fwdMsg.animation;
+          if (doc?.file_id) {
+            await storage.updateSyncedFileIds(file.id, doc.file_id, doc.file_unique_id);
+            success++;
+            // Delete the forwarded copy (best-effort)
+            fetch(`${apiBase}/deleteMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: binChannel, message_id: fwdMsg.message_id }),
+            }).catch(() => {});
+          } else {
+            failed++;
+          }
+          // Rate-limit: 30 messages/second max — wait 50ms between sends
+          await new Promise(r => setTimeout(r, 50));
+        } catch {
+          failed++;
+        }
+      }
+
+      res.json({ success: true, refreshed: success, failed, errors: errors.slice(0, 20) });
+    } catch (err: any) {
+      console.error("[refresh-all-ids]", err);
+      res.status(500).json({ message: err?.message || "Failed to refresh file IDs" });
+    }
+  });
+
   // Auto-add movie OR series from synced file name using TMDB
   app.post("/api/synced-files/:id/auto-add-movie", async (req, res) => {
     try {
@@ -1292,6 +1706,64 @@ export async function registerRoutes(
     }
   });
 
+  // ── Intro Video API ────────────────────────────────────────────────────────
+  // Public: check if an intro video is configured
+  app.get("/api/intro/config", async (_req, res) => {
+    try {
+      const s = await storage.getSettings();
+      res.json({
+        hasVideo: !!(s?.introVideoPath && fs.existsSync(s.introVideoPath)),
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Public: stream the intro video
+  app.get("/api/intro/video", async (_req, res) => {
+    try {
+      const s = await storage.getSettings();
+      const videoPath = s?.introVideoPath;
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return res.status(404).json({ message: "No intro video configured" });
+      }
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Content-Type", "video/mp4");
+      res.sendFile(videoPath);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: upload intro video
+  app.post("/api/admin/intro/upload", memoryUpload.single("video"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const introDir = path.resolve("public/intro");
+      if (!fs.existsSync(introDir)) fs.mkdirSync(introDir, { recursive: true });
+      const dest = path.join(introDir, "intro.mp4");
+      fs.writeFileSync(dest, req.file.buffer);
+      await storage.updateSettings({ introVideoPath: dest });
+      res.json({ message: "Intro video uploaded", path: dest });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: remove intro video
+  app.delete("/api/admin/intro/video", async (_req, res) => {
+    try {
+      const s = await storage.getSettings();
+      if (s?.introVideoPath && fs.existsSync(s.introVideoPath)) {
+        fs.unlinkSync(s.introVideoPath);
+      }
+      await storage.updateSettings({ introVideoPath: null });
+      res.json({ message: "Intro video removed" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // ── Mascot API ─────────────────────────────────────────────────────────────
   // Public: frontend reads these to know if mascot is on/off and which files to use
   app.get("/api/mascot/settings", async (_req, res) => {
@@ -1395,13 +1867,32 @@ export async function registerRoutes(
     "Referer": "https://www.xnxx.com/",
   };
 
-  // HLS / MP4 proxy — bypasses CORS for XNXX CDN streams
+  // HLS / MP4 proxy — bypasses CORS for XNXX CDN streams and proxies internal HLS paths
   app.get("/api/proxy/stream", async (req, res) => {
     try {
       const rawUrl = req.query.url as string;
       if (!rawUrl) return res.status(400).send("Missing url");
 
       const decoded = decodeURIComponent(rawUrl);
+
+      // Allow internal API paths (e.g. /api/hls/…) — proxy from localhost
+      if (decoded.startsWith("/")) {
+        const port = process.env.PORT || "5000";
+        const localUrl = `http://127.0.0.1:${port}${decoded}`;
+        const upstream = await fetch(localUrl);
+        res.set("Access-Control-Allow-Origin", "*");
+        const ct = upstream.headers.get("content-type") || "application/octet-stream";
+        res.set("Content-Type", ct);
+        const contentLength = upstream.headers.get("content-length");
+        if (contentLength) res.set("Content-Length", contentLength);
+        if (!upstream.ok || !upstream.body) {
+          return res.status(upstream.status).send(await upstream.text());
+        }
+        const { Readable } = await import("stream");
+        Readable.fromWeb(upstream.body as any).pipe(res);
+        return;
+      }
+
       const allowed = ["xnxx-cdn.com", "mp4-cdn", "hls-cdn", "thumb-cdn"];
       const isAllowed = allowed.some(d => decoded.includes(d));
       if (!isAllowed) return res.status(403).send("Forbidden");
@@ -1469,9 +1960,13 @@ export async function registerRoutes(
       res.setHeader("Access-Control-Allow-Origin", "*");
 
       if (type === "hls") {
-        // For HLS: use the internal proxy to feed ffmpeg
+        // For HLS: feed ffmpeg via the proxy (handles both internal and external URLs)
         const port = process.env.PORT || "5000";
-        const proxiedM3u8 = `http://127.0.0.1:${port}/api/proxy/stream?url=${encodeURIComponent(decoded)}`;
+        // If the URL is a relative internal path, fetch it directly from localhost
+        // so ffmpeg doesn't need to go through proxy/stream's domain filter
+        const proxiedM3u8 = decoded.startsWith("/")
+          ? `http://127.0.0.1:${port}${decoded}`
+          : `http://127.0.0.1:${port}/api/proxy/stream?url=${encodeURIComponent(decoded)}`;
 
         const ff = spawn("ffmpeg", [
           "-y",
@@ -1501,6 +1996,11 @@ export async function registerRoutes(
       }
 
       // MP4: fetch and pipe with attachment header
+      const port = process.env.PORT || "5000";
+      // Resolve relative paths to an absolute localhost URL
+      const fetchUrl = decoded.startsWith("/")
+        ? `http://127.0.0.1:${port}${decoded}`
+        : decoded;
       const isXnxx = decoded.includes("xnxx-cdn.com") || decoded.includes("mp4-cdn") || decoded.includes("hls-cdn");
       const fetchHeaders: Record<string, string> = isXnxx
         ? {
@@ -1512,10 +2012,9 @@ export async function registerRoutes(
           }
         : {
             "User-Agent": "Mozilla/5.0",
-            "Referer": decoded,
           };
 
-      const upstream = await fetch(decoded, { headers: fetchHeaders });
+      const upstream = await fetch(fetchUrl, { headers: fetchHeaders });
 
       if (!upstream.ok || !upstream.body) {
         return res.status(502).send("Failed to fetch source");

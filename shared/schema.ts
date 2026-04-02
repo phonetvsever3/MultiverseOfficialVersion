@@ -136,6 +136,9 @@ export const settings = pgTable("settings", {
   fsbPort: integer("fsb_port").default(8000),
   fsbFqdn: text("fsb_fqdn"),
   fsbHasSsl: boolean("fsb_has_ssl").default(false),
+  introVideoPath: text("intro_video_path"),
+  streamEnabled: boolean("stream_enabled").default(true),
+  apiKey: text("api_key"),
 });
 
 // Mascot Settings
