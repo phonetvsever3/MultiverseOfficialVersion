@@ -38,7 +38,6 @@ function formatTime(s: number) {
 
 function toProxied(src: VideoSource) {
   if (src.type === "hls") {
-    // Local HLS URLs (our own server) — pass directly, no proxy needed
     if (src.url.startsWith("/")) {
       return { src: src.url, type: "application/x-mpegURL" };
     }
@@ -71,6 +70,36 @@ function unlockOrientation() {
   } catch {}
 }
 
+// Try fullscreen using multiple approaches
+async function requestFullscreen(wrapperEl: HTMLElement, videoEl: HTMLVideoElement | null) {
+  const tg = (window as any).Telegram?.WebApp;
+  if (tg?.requestFullscreen) {
+    try { tg.requestFullscreen(); return; } catch {}
+  }
+  if (!document.fullscreenElement) {
+    try {
+      await wrapperEl.requestFullscreen();
+      return;
+    } catch {}
+    // Fallback: try the video element itself
+    if (videoEl) {
+      try { await (videoEl as any).requestFullscreen(); return; } catch {}
+      try { await (videoEl as any).webkitRequestFullscreen(); return; } catch {}
+      try { await (videoEl as any).mozRequestFullScreen(); return; } catch {}
+    }
+    // Last resort: try document element
+    try { await document.documentElement.requestFullscreen(); } catch {}
+  }
+}
+
+async function exitFullscreen() {
+  const tg = (window as any).Telegram?.WebApp;
+  if (tg?.exitFullscreen) {
+    try { tg.exitFullscreen(); return; } catch {}
+  }
+  try { await document.exitFullscreen(); } catch {}
+}
+
 export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = false, showPrerollAd = false }: VideoPlayerProps) {
   const wrapperRef    = useRef<HTMLDivElement>(null);
   const containerRef  = useRef<HTMLDivElement>(null);
@@ -93,6 +122,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
   const [playbackSpeed,    setPlaybackSpeed]    = useState(1);
   const [downloading,      setDownloading]      = useState(false);
   const [showPlayPulse,    setShowPlayPulse]    = useState(false);
+  const [seekFlash,        setSeekFlash]        = useState<"back" | "forward" | null>(null);
   const [isPortrait,       setIsPortrait]       = useState(false);
   const [orientationLocked,setOrientationLocked]= useState(false);
   const [pipAvailable,     setPipAvailable]     = useState(false);
@@ -118,13 +148,32 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
   const showPrerollRef  = useRef(showPrerollAd);
   useEffect(() => { showPrerollRef.current = showPrerollAd; }, [showPrerollAd]);
 
+  // Keep menus open state in a ref for stable callbacks
+  const menuOpenRef = useRef(false);
+  useEffect(() => { menuOpenRef.current = speedOpen || qualityOpen; }, [speedOpen, qualityOpen]);
+
+  const playingRef = useRef(playing);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+
   const resetHide = useCallback((isPlaying: boolean) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     setControlsVisible(true);
-    if (isPlaying) {
-      hideTimer.current = setTimeout(() => setControlsVisible(false), 3500);
+    if (isPlaying && !menuOpenRef.current) {
+      hideTimer.current = setTimeout(() => {
+        if (!menuOpenRef.current) setControlsVisible(false);
+      }, 3500);
     }
   }, []);
+
+  // Keep controls visible while a menu is open
+  useEffect(() => {
+    if (speedOpen || qualityOpen) {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      setControlsVisible(true);
+    } else {
+      resetHide(playingRef.current);
+    }
+  }, [speedOpen, qualityOpen, resetHide]);
 
   const closeAd = useCallback(() => {
     if (adTimerRef.current) { clearInterval(adTimerRef.current); adTimerRef.current = null; }
@@ -240,7 +289,6 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     player.on("ended",    () => { setPlaying(false); setControlsVisible(true); });
     player.on("error",    () => { setError(true); setLoading(false); });
 
-    // Safety timeout — if the player is still loading after 12 seconds, show error
     const loadTimeout = setTimeout(() => {
       if (playerRef.current && !playerRef.current.isDisposed()) {
         const readyState = (playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null)?.readyState ?? 0;
@@ -250,11 +298,11 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         }
       }
     }, 12000);
+
     player.on("timeupdate", () => {
       const ct = player.currentTime() ?? 0;
       setCurrentTime(ct);
       setBuffered(player.bufferedEnd() ?? 0);
-      // Trigger mid-roll ad after 15 seconds if enabled and not yet shown
       if (showMidrollRef.current && !adShown.current && ct >= 15) {
         adShown.current = true;
         triggerMidrollAd();
@@ -267,7 +315,6 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     });
     player.on("ratechange", () => setPlaybackSpeed(player.playbackRate() ?? 1));
 
-    // PiP support detection
     const internalEl = player.el()?.querySelector("video") as HTMLVideoElement | null;
     if (internalEl) {
       setPipAvailable(document.pictureInPictureEnabled && !internalEl.disablePictureInPicture);
@@ -283,16 +330,14 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
     playerRef.current = player;
 
-    // Trigger pre-roll once on first load
     if (showPrerollRef.current && !prerollShown.current) {
       prerollShown.current = true;
-      // Wait for the player to be ready before pausing/showing pre-roll
       player.one("canplay", () => {
         clearTimeout(loadTimeout);
         triggerPrerollAd();
       });
     }
-    player.one("play", () => clearTimeout(loadTimeout));
+    player.one("play",  () => clearTimeout(loadTimeout));
     player.one("error", () => clearTimeout(loadTimeout));
   }, [sources, poster, resetHide, triggerMidrollAd, triggerPrerollAd]);
 
@@ -317,26 +362,17 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     };
   }, [activeIndex]);
 
-  // Auto fullscreen on mount
-  useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el) return;
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg?.requestFullscreen) {
-      try { tg.requestFullscreen(); } catch {}
-    } else if (document.fullscreenEnabled && !document.fullscreenElement) {
-      const timer = setTimeout(() => {
-        el.requestFullscreen().catch(() => {});
-        lockLandscape();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
   // Fullscreen change & orientation detection
   useEffect(() => {
-    const onFs = () => setFullscreen(!!document.fullscreenElement);
+    const onFs = () => {
+      const isFs = !!(document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement);
+      setFullscreen(isFs);
+    };
     document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    document.addEventListener("mozfullscreenchange", onFs);
 
     const mq = window.matchMedia("(orientation: portrait)");
     const onOrient = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
@@ -345,11 +381,12 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
     return () => {
       document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs);
+      document.removeEventListener("mozfullscreenchange", onFs);
       mq.removeEventListener("change", onOrient);
     };
   }, []);
 
-  // Apply playback rate whenever it changes
   const applySpeed = (speed: number) => {
     const p = playerRef.current;
     if (!p) return;
@@ -373,14 +410,16 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     if (!p) return;
     const t = (p.currentTime() ?? 0) + delta;
     p.currentTime(Math.max(0, Math.min(t, p.duration() ?? Infinity)));
-    resetHide(playing);
+    setSeekFlash(delta < 0 ? "back" : "forward");
+    setTimeout(() => setSeekFlash(null), 700);
+    resetHide(playingRef.current);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const p = playerRef.current;
     if (!p || !isFinite(p.duration() ?? 0)) return;
     p.currentTime((parseFloat(e.target.value) / 1000) * (p.duration() ?? 0));
-    resetHide(playing);
+    resetHide(playingRef.current);
   };
 
   const handleVolume = (val: number) => {
@@ -396,15 +435,16 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     p.muted(!p.muted());
   };
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
     const el = wrapperRef.current;
     if (!el) return;
-    if (!document.fullscreenElement) {
-      el.requestFullscreen().catch(() => {});
-      lockLandscape();
-    } else {
-      document.exitFullscreen().catch(() => {});
+    const videoEl = playerRef.current?.el()?.querySelector("video") as HTMLVideoElement | null;
+    if (fullscreen) {
+      await exitFullscreen();
       if (!orientationLocked) unlockOrientation();
+    } else {
+      await requestFullscreen(el, videoEl);
+      lockLandscape();
     }
   };
 
@@ -444,15 +484,12 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     if (!src) return;
     setDownloading(true);
     const safeTitle = (title || src.label).replace(/[^a-z0-9_\-\s]/gi, "_");
-
-    // Telegram stream — use the stream endpoint directly with ?download=1
     let url: string;
     if (src.url.startsWith("/api/stream/telegram/")) {
       url = `${src.url}?download=1`;
     } else {
       url = `/api/proxy/download?url=${encodeURIComponent(src.url)}&type=${src.type}&title=${encodeURIComponent(title || src.label)}`;
     }
-
     const a = document.createElement("a");
     a.href = url;
     a.download = `${safeTitle}.mp4`;
@@ -462,17 +499,27 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     setTimeout(() => setDownloading(false), 3000);
   };
 
+  const handleTapZone = () => {
+    // If any menu is open, close it and don't toggle play
+    if (speedOpen || qualityOpen) {
+      setSpeedOpen(false);
+      setQualityOpen(false);
+      return;
+    }
+    togglePlay();
+  };
+
   const currentSrc = sources[activeIndex];
   const progress    = duration > 0 ? (currentTime / duration) * 1000 : 0;
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0;
+  const anyMenuOpen = speedOpen || qualityOpen;
 
   return (
     <div
       ref={wrapperRef}
       className="fixed inset-0 z-[400] bg-black flex flex-col overflow-hidden"
-      onMouseMove={() => resetHide(playing)}
-      onTouchStart={() => resetHide(playing)}
-      onClick={(e) => { if (e.target === e.currentTarget) { setQualityOpen(false); setSpeedOpen(false); } }}
+      onMouseMove={() => resetHide(playingRef.current)}
+      onTouchStart={() => resetHide(playingRef.current)}
     >
       {/* VIDEO.JS */}
       <div ref={containerRef} className="absolute inset-0 [&_.video-js]:w-full [&_.video-js]:h-full [&_.video-js]:bg-black" />
@@ -505,14 +552,10 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         <div className="absolute inset-0 z-[150] flex flex-col bg-black overflow-hidden">
           <div className="flex-1 relative overflow-hidden">
             <AdRenderer ad={prerollData} />
-
-            {/* Top-left: "Ad" badge + label */}
             <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-black/60 border border-white/10 backdrop-blur-sm rounded-full px-2.5 py-1 pointer-events-none">
               <Megaphone className="w-3 h-3 text-yellow-400" />
               <span className="text-yellow-400 text-[9px] font-black uppercase tracking-widest">Pre-roll Ad</span>
             </div>
-
-            {/* Top-right: skip / countdown pill */}
             <div className="absolute top-4 right-4 z-10">
               {prerollSkippable ? (
                 <button
@@ -528,8 +571,6 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                 </div>
               )}
             </div>
-
-            {/* Bottom-right: countdown ring */}
             <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
               <div className="relative w-9 h-9">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
@@ -553,11 +594,8 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       {/* MID-ROLL AD OVERLAY */}
       {adVisible && adData && (
         <div className="absolute inset-0 z-[150] flex flex-col bg-black overflow-hidden">
-          {/* Ad content fills the player */}
           <div className="flex-1 relative overflow-hidden">
             <AdRenderer ad={adData} />
-
-            {/* Top-right: skip / countdown pill */}
             <div className="absolute top-4 right-4 z-10">
               {adSkippable ? (
                 <button
@@ -573,14 +611,10 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                 </div>
               )}
             </div>
-
-            {/* Bottom-left: "Ad" badge */}
             <div className="absolute bottom-4 left-4 z-10 flex items-center gap-1.5 bg-black/60 border border-white/10 backdrop-blur-sm rounded-full px-2.5 py-1 pointer-events-none">
               <Megaphone className="w-3 h-3 text-yellow-400" />
               <span className="text-yellow-400 text-[9px] font-black uppercase tracking-widest">Ad</span>
             </div>
-
-            {/* Countdown ring (decorative) */}
             <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
               <div className="relative w-9 h-9">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
@@ -612,6 +646,18 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         </div>
       )}
 
+      {/* SEEK FLASH */}
+      {seekFlash && (
+        <div className={`absolute inset-y-0 ${seekFlash === "back" ? "left-0 right-1/2" : "left-1/2 right-0"} flex items-center ${seekFlash === "back" ? "justify-start pl-8" : "justify-end pr-8"} pointer-events-none z-20`}>
+          <div className="flex flex-col items-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-2xl px-4 py-3 animate-in fade-in zoom-in-90 duration-100">
+            {seekFlash === "back"
+              ? <RotateCcw className="w-6 h-6 text-white" />
+              : <RotateCw  className="w-6 h-6 text-white" />}
+            <span className="text-white text-xs font-black">10s</span>
+          </div>
+        </div>
+      )}
+
       {/* SPEED BADGE (floating) */}
       {playbackSpeed !== 1 && !speedOpen && controlsVisible && (
         <div className="absolute top-20 right-4 z-30 pointer-events-none">
@@ -621,37 +667,35 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         </div>
       )}
 
-      {/* TAP ZONE */}
-      <div className="absolute inset-0 z-10" onClick={togglePlay} />
+      {/* MENU BACKDROP — closes menus when tapping outside */}
+      {anyMenuOpen && (
+        <div
+          className="absolute inset-0 z-[35]"
+          onClick={() => { setSpeedOpen(false); setQualityOpen(false); }}
+        />
+      )}
 
-      {/* SEEK SKIP ZONES */}
-      <button
-        className="absolute left-0 top-0 w-1/4 h-full z-20 flex items-center justify-start pl-4 opacity-0 active:opacity-100 transition-opacity"
+      {/* TAP ZONE — handles play/pause and menu close */}
+      <div className="absolute inset-0 z-10" onClick={handleTapZone} />
+
+      {/* DOUBLE-TAP SEEK ZONES */}
+      <div
+        className="absolute left-0 top-0 w-1/3 h-full z-20 select-none"
         onDoubleClick={(e) => { e.stopPropagation(); seek(-10); }}
-      >
-        <div className="flex flex-col items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl px-3 py-3">
-          <RotateCcw className="w-5 h-5 text-white" />
-          <span className="text-white text-[10px] font-black">10s</span>
-        </div>
-      </button>
-      <button
-        className="absolute right-0 top-0 w-1/4 h-full z-20 flex items-center justify-end pr-4 opacity-0 active:opacity-100 transition-opacity"
+      />
+      <div
+        className="absolute right-0 top-0 w-1/3 h-full z-20 select-none"
         onDoubleClick={(e) => { e.stopPropagation(); seek(10); }}
-      >
-        <div className="flex flex-col items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl px-3 py-3">
-          <RotateCw className="w-5 h-5 text-white" />
-          <span className="text-white text-[10px] font-black">10s</span>
-        </div>
-      </button>
+      />
 
       {/* CONTROLS OVERLAY */}
       <div
-        className={`absolute inset-0 flex flex-col justify-between z-30 transition-opacity duration-300 pointer-events-none ${
-          controlsVisible ? "opacity-100" : "opacity-0"
+        className={`absolute inset-0 flex flex-col justify-between z-30 transition-opacity duration-300 ${
+          controlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
         }`}
       >
         {/* TOP BAR */}
-        <div className="pointer-events-auto flex items-center gap-2 px-4 pt-5 pb-10 bg-gradient-to-b from-black/80 via-black/20 to-transparent">
+        <div className="flex items-center gap-2 px-4 pt-5 pb-10 bg-gradient-to-b from-black/80 via-black/20 to-transparent">
           <button
             onClick={onClose}
             data-testid="player-close"
@@ -735,7 +779,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         </div>
 
         {/* BOTTOM CONTROLS */}
-        <div className="pointer-events-auto flex flex-col gap-2 px-4 pt-10 pb-7 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
+        <div className="flex flex-col gap-2 px-4 pt-10 pb-7 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
           {/* SEEK BAR */}
           <div className="relative w-full h-8 flex items-center">
             <div className="absolute left-0 right-0 h-1 rounded-full bg-white/10" />
@@ -795,31 +839,38 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
             {/* Skip -10 */}
             <button
               onClick={() => seek(-10)}
-              className="w-9 h-9 rounded-full bg-white/8 border border-white/10 flex items-center justify-center hover:bg-white/15 active:scale-90 transition-all"
+              data-testid="player-rewind"
+              className="w-9 h-9 rounded-full bg-white/10 border border-white/15 flex items-center justify-center hover:bg-white/20 active:scale-90 transition-all"
             >
-              <RotateCcw className="w-4 h-4 text-white/70" />
+              <RotateCcw className="w-4 h-4 text-white/80" />
             </button>
 
             {/* Skip +10 */}
             <button
               onClick={() => seek(10)}
-              className="w-9 h-9 rounded-full bg-white/8 border border-white/10 flex items-center justify-center hover:bg-white/15 active:scale-90 transition-all"
+              data-testid="player-forward"
+              className="w-9 h-9 rounded-full bg-white/10 border border-white/15 flex items-center justify-center hover:bg-white/20 active:scale-90 transition-all"
             >
-              <RotateCw className="w-4 h-4 text-white/70" />
+              <RotateCw className="w-4 h-4 text-white/80" />
             </button>
 
             <div className="flex-1" />
 
             {/* Volume (desktop) */}
             <div className="hidden sm:flex items-center gap-2">
-              <button onClick={toggleMute} className="text-white/50 hover:text-white transition-colors">
+              <button
+                onClick={toggleMute}
+                data-testid="player-mute"
+                className="text-white/60 hover:text-white transition-colors active:scale-90"
+              >
                 {muted || volume === 0
                   ? <VolumeX className="w-4 h-4" />
                   : <Volume2 className="w-4 h-4" />}
               </button>
-              <div className="relative w-20 h-1 bg-white/15 rounded-full">
+              <div className="relative w-20 h-5 flex items-center">
+                <div className="absolute left-0 right-0 h-1 bg-white/15 rounded-full" />
                 <div
-                  className="absolute left-0 top-0 h-full rounded-full bg-white/60"
+                  className="absolute left-0 h-1 rounded-full bg-white/60"
                   style={{ width: `${(muted ? 0 : volume) * 100}%` }}
                 />
                 <input
@@ -829,20 +880,25 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                   step={0.05}
                   value={muted ? 0 : volume}
                   onChange={(e) => handleVolume(parseFloat(e.target.value))}
-                  className="absolute inset-0 w-full opacity-0 cursor-pointer h-4 -top-1.5"
+                  data-testid="player-volume"
+                  className="absolute inset-0 w-full opacity-0 cursor-pointer"
                 />
               </div>
             </div>
 
-            {/* Volume mobile */}
-            <button onClick={toggleMute} className="sm:hidden text-white/50 hover:text-white transition-colors">
+            {/* Volume — mobile tap to mute */}
+            <button
+              onClick={toggleMute}
+              data-testid="player-mute-mobile"
+              className="sm:hidden text-white/60 hover:text-white transition-colors active:scale-90 w-9 h-9 rounded-full bg-white/10 border border-white/15 flex items-center justify-center"
+            >
               {muted || volume === 0
                 ? <VolumeX className="w-4 h-4" />
                 : <Volume2 className="w-4 h-4" />}
             </button>
 
             {/* Speed picker */}
-            <div className="relative">
+            <div className="relative z-[40]">
               <button
                 onClick={(e) => { e.stopPropagation(); setSpeedOpen(p => !p); setQualityOpen(false); }}
                 data-testid="player-speed"
@@ -856,20 +912,23 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                 {playbackSpeed}×
               </button>
               {speedOpen && (
-                <div className="absolute bottom-full right-0 mb-3 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl shadow-black/80 min-w-[110px]">
+                <div
+                  className="absolute bottom-full right-0 mb-3 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl shadow-black/80 min-w-[120px] z-[50]"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="px-3 py-2 border-b border-white/5">
-                    <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Speed</p>
+                    <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Playback Speed</p>
                   </div>
                   {SPEEDS.map(s => (
                     <button
                       key={s}
                       onClick={(e) => { e.stopPropagation(); applySpeed(s); }}
-                      className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-black transition-colors hover:bg-white/8 ${
-                        s === playbackSpeed ? "text-amber-400" : "text-white/50"
+                      className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-black transition-colors hover:bg-white/8 active:bg-white/12 ${
+                        s === playbackSpeed ? "text-amber-400" : "text-white/60"
                       }`}
                     >
                       {s === 1 ? "Normal" : `${s}×`}
-                      {s === playbackSpeed && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+                      {s === playbackSpeed && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
                     </button>
                   ))}
                 </div>
@@ -878,7 +937,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
             {/* Quality picker */}
             {sources.length > 1 && (
-              <div className="relative">
+              <div className="relative z-[40]">
                 <button
                   onClick={(e) => { e.stopPropagation(); setQualityOpen(p => !p); setSpeedOpen(false); }}
                   data-testid="player-quality"
@@ -886,10 +945,13 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                 >
                   <Settings className="w-3 h-3" />
                   {currentSrc?.label}
-                  <ChevronDown className={`w-3 h-3 transition-transform ${qualityOpen ? "rotate-180" : ""}`} />
+                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${qualityOpen ? "rotate-180" : ""}`} />
                 </button>
                 {qualityOpen && (
-                  <div className="absolute bottom-full right-0 mb-3 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl shadow-black/80 min-w-[140px]">
+                  <div
+                    className="absolute bottom-full right-0 mb-3 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl shadow-black/80 min-w-[150px] z-[50]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="px-3 py-2 border-b border-white/5">
                       <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Quality</p>
                     </div>
@@ -897,15 +959,15 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
                       <button
                         key={s.label}
                         onClick={(e) => { e.stopPropagation(); setActiveIndex(i); setQualityOpen(false); }}
-                        className={`w-full flex items-center gap-2.5 px-4 py-3 text-xs font-black text-left transition-colors hover:bg-white/8 ${
-                          i === activeIndex ? "text-red-400" : "text-white/50"
+                        className={`w-full flex items-center gap-2.5 px-4 py-3 text-xs font-black text-left transition-colors hover:bg-white/8 active:bg-white/12 ${
+                          i === activeIndex ? "text-red-400" : "text-white/60"
                         }`}
                       >
                         {s.type === "hls"
                           ? <Radio className="w-3 h-3 flex-shrink-0" />
                           : <Film  className="w-3 h-3 flex-shrink-0" />}
                         {s.label}
-                        {i === activeIndex && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
+                        {i === activeIndex && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-red-500" />}
                       </button>
                     ))}
                   </div>
@@ -918,6 +980,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
               onClick={toggleFullscreen}
               data-testid="player-fullscreen"
               className="w-9 h-9 rounded-full bg-white/10 border border-white/15 flex items-center justify-center hover:bg-white/20 active:scale-90 transition-all"
+              title={fullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
             >
               {fullscreen
                 ? <Minimize className="w-4 h-4 text-white" />

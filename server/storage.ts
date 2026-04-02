@@ -19,6 +19,7 @@ export interface IStorage {
   // Movies
   getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean }): Promise<{ items: Movie[], total: number }>;
   getMoviesByIds(ids: number[]): Promise<Movie[]>;
+  getTrendingByPeriod(days: number, limit?: number): Promise<Movie[]>;
   incrementMovieViews(id: number): Promise<void>;
   logDailyView(movieId?: number): Promise<void>;
   getViewStats(days: number): Promise<{ date: string; count: number }[]>;
@@ -178,6 +179,23 @@ export class DatabaseStorage implements IStorage {
   async getMoviesByIds(ids: number[]): Promise<Movie[]> {
     if (ids.length === 0) return [];
     return await db.select().from(movies).where(inArray(movies.id, ids));
+  }
+
+  async getTrendingByPeriod(days: number, limit = 12): Promise<Movie[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - days + 1);
+    const sinceStr = since.toISOString().slice(0, 10);
+    const rows = await db
+      .select({ movieId: viewLogs.movieId, total: sql<number>`sum(${viewLogs.count})` })
+      .from(viewLogs)
+      .where(and(gte(viewLogs.date, sinceStr), sql`${viewLogs.movieId} IS NOT NULL`))
+      .groupBy(viewLogs.movieId)
+      .orderBy(desc(sql`sum(${viewLogs.count})`))
+      .limit(limit);
+    const ids = rows.map(r => r.movieId as number).filter(Boolean);
+    if (ids.length === 0) return [];
+    const items = await db.select().from(movies).where(inArray(movies.id, ids));
+    return ids.map(id => items.find(m => m.id === id)).filter(Boolean) as Movie[];
   }
 
   async incrementMovieViews(id: number): Promise<void> {

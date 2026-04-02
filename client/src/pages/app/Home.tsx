@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music } from "lucide-react";
+import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music, Ghost, Rocket, TrendingUp, CalendarDays } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
@@ -25,6 +25,10 @@ interface HomeSections {
   newSeries: Movie[];
   action: Movie[];
   animation: Movie[];
+  horror: Movie[];
+  scifi: Movie[];
+  todayTrending: Movie[];
+  weeklyTrending: Movie[];
 }
 
 function getPoster(path: string | null | undefined, size = "w342") {
@@ -401,6 +405,34 @@ export default function Home() {
           <>
             <HeroSlider items={featuredItems} onMovieClick={handleMovieClick} />
 
+            {/* Today Trending */}
+            {(sections?.todayTrending?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Today Trending"
+                icon={<TrendingUp className="w-5 h-5 text-red-300" />}
+                badge="Most watched today"
+                accentFrom="from-red-950/60"
+                accentTo="to-rose-900/20"
+                borderColor="border-red-500/20"
+                items={sections?.todayTrending || []}
+                onMovieClick={handleMovieClick}
+              />
+            )}
+
+            {/* Weekly Trending */}
+            {(sections?.weeklyTrending?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Weekly Trending"
+                icon={<CalendarDays className="w-5 h-5 text-violet-300" />}
+                badge="Top picks this week"
+                accentFrom="from-violet-950/60"
+                accentTo="to-purple-900/20"
+                borderColor="border-violet-500/20"
+                items={sections?.weeklyTrending || []}
+                onMovieClick={handleMovieClick}
+              />
+            )}
+
             {/* Latest Uploads */}
             <PremiumSection
               title="Latest Uploads"
@@ -467,6 +499,36 @@ export default function Home() {
                 items={sections?.animation || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?search=animation&sort=rating&title=Animation')}
+              />
+            )}
+
+            {/* Horror */}
+            {(sections?.horror?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Horror"
+                icon={<Ghost className="w-5 h-5 text-red-300" />}
+                badge="Spine-chilling horror picks"
+                accentFrom="from-red-950/60"
+                accentTo="to-slate-900/20"
+                borderColor="border-red-900/30"
+                items={sections?.horror || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=horror&sort=rating&title=Horror')}
+              />
+            )}
+
+            {/* Sci-Fi */}
+            {(sections?.scifi?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="Sci-Fi"
+                icon={<Rocket className="w-5 h-5 text-cyan-300" />}
+                badge="Futuristic science fiction"
+                accentFrom="from-cyan-950/60"
+                accentTo="to-blue-900/20"
+                borderColor="border-cyan-500/20"
+                items={sections?.scifi || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=sci-fi&sort=rating&title=Sci-Fi')}
               />
             )}
 

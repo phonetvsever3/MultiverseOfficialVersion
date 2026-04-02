@@ -1574,7 +1574,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation] = await Promise.all([
+      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending] = await Promise.all([
         storage.getMovies({ limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ type: 'movie', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ type: 'series', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
@@ -1586,8 +1586,12 @@ export async function registerRoutes(
         storage.getMovies({ type: 'series', limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ search: 'action', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ search: 'animation', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
+        storage.getMovies({ search: 'horror', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
+        storage.getMovies({ search: 'sci-fi', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
+        storage.getTrendingByPeriod(1, 12),
+        storage.getTrendingByPeriod(7, 12),
       ]);
-      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation };
+      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending };
       setCache(cacheKey, result, TTL.HOME);
       res.setHeader("Cache-Control", `public, max-age=${TTL.HOME / 1000}`);
       res.json(result);

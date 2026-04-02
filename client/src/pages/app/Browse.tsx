@@ -22,14 +22,18 @@ function getParams() {
     sort: params.get("sort") || "rating",
     lang: params.get("lang") || "",
     search: params.get("search") || "",
+    actor: params.get("actor") || "",
     title: params.get("title") || "",
   };
 }
 
-function getTitle(type: string, sort: string, lang: string, search: string, customTitle: string) {
+function getTitle(type: string, sort: string, lang: string, search: string, actor: string, customTitle: string) {
   if (customTitle) return customTitle;
+  if (actor) return `${actor} — Movies`;
   if (search === "animation") return "Animation";
   if (search === "action") return "Action";
+  if (search === "horror") return "Horror";
+  if (search === "sci-fi") return "Sci-Fi";
   if (lang === "ko") return "K-Drama";
   if (lang === "hi") return "Bollywood";
   if (sort === "latest" && type === "movie") return "New Movies";
@@ -43,18 +47,20 @@ function getTitle(type: string, sort: string, lang: string, search: string, cust
 
 export default function Browse() {
   const [, setLocation] = useLocation();
-  const { type, sort, lang, search, title } = getParams();
+  const { type, sort, lang, search, actor, title } = getParams();
   const [page, setPage] = useState(1);
   const [allItems, setAllItems] = useState<Movie[]>([]);
 
+  const effectiveSearch = actor || search;
+
   const { data, isLoading, isFetching } = useQuery<{ items: Movie[]; total: number }>({
-    queryKey: [`/api/browse`, type, sort, lang, search, page],
+    queryKey: [`/api/browse`, type, sort, lang, effectiveSearch, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (type) params.set("type", type);
       if (sort) params.set("sort", sort);
       if (lang) params.set("lang", lang);
-      if (search) params.set("search", search);
+      if (effectiveSearch) params.set("search", effectiveSearch);
       params.set("page", String(page));
       const res = await fetch(`/api/browse?${params}`);
       return res.json();
@@ -71,7 +77,7 @@ export default function Browse() {
     }
   }, [data, page]);
 
-  const pageTitle = getTitle(type, sort, lang, search, title);
+  const pageTitle = getTitle(type, sort, lang, search, actor, title);
   const hasMore = data ? allItems.length < data.total : false;
 
   return (

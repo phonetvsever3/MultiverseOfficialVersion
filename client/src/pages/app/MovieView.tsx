@@ -461,7 +461,8 @@ export default function MovieView() {
               {movie.cast.slice(0, 10).map((actor: any, idx: number) => (
                 <div
                   key={idx}
-                  className="flex-shrink-0 w-[100px] snap-start group"
+                  onClick={() => setLocation(`/app/browse?actor=${encodeURIComponent(actor.name)}&sort=rating`)}
+                  className="flex-shrink-0 w-[100px] snap-start group cursor-pointer active:scale-95 transition-transform"
                   data-testid={`cast-card-${idx}`}
                 >
                   {/* Profile Photo */}
