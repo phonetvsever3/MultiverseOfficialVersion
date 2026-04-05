@@ -468,6 +468,7 @@ export default function AdminMovies() {
   const [isSearching, setIsSearching] = useState(false);
   const [tmdbApiKey, setTmdbApiKey] = useState<string>("");
   const [movieCast, setMovieCast] = useState<string[]>([]);
+  const [qualityUrlsList, setQualityUrlsList] = useState<Array<{ label: string; mode: "fileid" | "url"; fileId?: string; url?: string; type?: "mp4" | "hls" }>>([]);
 
   const form = useForm<InsertMovie>({
     resolver: zodResolver(insertMovieSchema),
@@ -563,6 +564,17 @@ export default function AdminMovies() {
       fileSize: movie.fileSize ? Math.round(movie.fileSize / (1024 * 1024)) : 0,
       fileUniqueId: movie.fileUniqueId,
     });
+    setQualityUrlsList(
+      Array.isArray(movie.qualityUrls)
+        ? movie.qualityUrls.map((q: any) => ({
+            label: q.label || "1080p",
+            mode: q.fileId ? "fileid" : "url",
+            fileId: q.fileId || "",
+            url: q.url || "",
+            type: q.type || "mp4",
+          }))
+        : []
+    );
     setOpen(true);
   };
 
@@ -585,11 +597,18 @@ export default function AdminMovies() {
   };
 
   const onSubmit = (data: InsertMovie) => {
-    // Convert MB → bytes before saving; merge cast if fetched from TMDB
+    // Convert MB → bytes before saving; merge cast if fetched from TMDB; include quality URLs
     const dataWithBytes = {
       ...data,
       fileSize: (data.fileSize || 0) * 1024 * 1024,
-      ...(movieCast.length > 0 ? { cast: movieCast } : {})
+      ...(movieCast.length > 0 ? { cast: movieCast } : {}),
+      qualityUrls: qualityUrlsList.length > 0
+        ? qualityUrlsList.map(({ mode, label, fileId, url, type }) =>
+            mode === "fileid"
+              ? { label, fileId: fileId || "" }
+              : { label, url: url || "", type: type || "mp4" }
+          )
+        : null,
     } as any;
     if (editingMovie) {
       updateMovie({ id: editingMovie.id, updates: dataWithBytes }, {
@@ -597,6 +616,7 @@ export default function AdminMovies() {
           setOpen(false);
           setEditingMovie(null);
           setMovieCast([]);
+          setQualityUrlsList([]);
           form.reset();
           toast({ title: "Updated successfully" });
         }
@@ -606,6 +626,7 @@ export default function AdminMovies() {
         onSuccess: () => {
           setOpen(false);
           setMovieCast([]);
+          setQualityUrlsList([]);
           form.reset();
           toast({ title: "Added successfully" });
         }
@@ -807,6 +828,109 @@ export default function AdminMovies() {
                         )}
                       />
                     )}
+
+                    {/* Multi-Quality Stream Sources */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <FormLabel className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-blue-500" /> Multi-Quality Sources
+                        </FormLabel>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs px-2"
+                          data-testid="button-add-quality-url"
+                          onClick={() => setQualityUrlsList(prev => [...prev, { label: "720p", mode: "fileid", fileId: "", url: "", type: "mp4" }])}
+                        >
+                          <Plus className="w-3 h-3 mr-1" /> Add Quality
+                        </Button>
+                      </div>
+                      {qualityUrlsList.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No quality sources added. The built-in Telegram stream will be used as the only option.</p>
+                      )}
+                      {qualityUrlsList.map((entry, i) => (
+                        <div key={i} className="rounded-lg border border-border bg-secondary/10 p-3 space-y-2">
+                          <div className="flex gap-2 items-center">
+                            {/* Quality label */}
+                            <select
+                              className="h-8 rounded-md border border-border bg-background text-sm px-2 w-24 shrink-0"
+                              value={entry.label}
+                              data-testid={`select-quality-label-${i}`}
+                              onChange={e => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, label: e.target.value } : q))}
+                            >
+                              <option value="480p">480p</option>
+                              <option value="720p">720p</option>
+                              <option value="1080p">1080p</option>
+                              <option value="4k">4K</option>
+                              <option value="HD">HD</option>
+                            </select>
+                            {/* Mode toggle */}
+                            <div className="flex rounded-md border border-border overflow-hidden text-xs">
+                              <button
+                                type="button"
+                                data-testid={`btn-mode-fileid-${i}`}
+                                className={`px-2 py-1.5 font-medium transition-colors ${entry.mode === "fileid" ? "bg-primary text-white" : "bg-background text-muted-foreground hover:bg-secondary"}`}
+                                onClick={() => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, mode: "fileid" } : q))}
+                              >
+                                File ID
+                              </button>
+                              <button
+                                type="button"
+                                data-testid={`btn-mode-url-${i}`}
+                                className={`px-2 py-1.5 font-medium transition-colors ${entry.mode === "url" ? "bg-primary text-white" : "bg-background text-muted-foreground hover:bg-secondary"}`}
+                                onClick={() => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, mode: "url" } : q))}
+                              >
+                                URL
+                              </button>
+                            </div>
+                            <div className="flex-1" />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 shrink-0"
+                              data-testid={`button-remove-quality-url-${i}`}
+                              onClick={() => setQualityUrlsList(prev => prev.filter((_, idx) => idx !== i))}
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          {/* Input based on mode */}
+                          {entry.mode === "fileid" ? (
+                            <Input
+                              className="h-8 text-xs font-mono"
+                              placeholder="Telegram File ID (e.g. BQACAgIAAxk...)"
+                              value={entry.fileId || ""}
+                              data-testid={`input-quality-fileid-${i}`}
+                              onChange={e => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, fileId: e.target.value } : q))}
+                            />
+                          ) : (
+                            <div className="flex gap-2">
+                              <Input
+                                className="flex-1 h-8 text-xs"
+                                placeholder="https://stream.example.com/video.mp4"
+                                value={entry.url || ""}
+                                data-testid={`input-quality-url-${i}`}
+                                onChange={e => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, url: e.target.value } : q))}
+                              />
+                              <select
+                                className="h-8 rounded-md border border-border bg-background text-xs px-2 w-20 shrink-0"
+                                value={entry.type || "mp4"}
+                                data-testid={`select-quality-type-${i}`}
+                                onChange={e => setQualityUrlsList(prev => prev.map((q, idx) => idx === i ? { ...q, type: e.target.value as "mp4" | "hls" } : q))}
+                              >
+                                <option value="mp4">MP4</option>
+                                <option value="hls">HLS</option>
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {qualityUrlsList.length > 0 && (
+                        <p className="text-[10px] text-muted-foreground">Each quality appears as an option in the player. "Auto" (built-in stream) is always added automatically.</p>
+                      )}
+                    </div>
 
                     <Button type="submit" size="lg" className="w-full font-black text-lg h-14 rounded-xl shadow-lg" disabled={isCreating || isUpdating}>
                       {editingMovie ? "UPDATE CONTENT" : "CREATE CONTENT"}

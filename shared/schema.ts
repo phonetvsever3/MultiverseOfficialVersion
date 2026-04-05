@@ -30,6 +30,7 @@ export const movies = pgTable("movies", {
   postedToChannel: boolean("posted_to_channel").default(false),
   status: text("status").default("completed"),
   streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
+  qualityUrls: jsonb("quality_urls"), // [{label:"1080p",url:"...",type:"mp4"|"hls"}]
   createdAt: timestamp("created_at").defaultNow(),
 });
 

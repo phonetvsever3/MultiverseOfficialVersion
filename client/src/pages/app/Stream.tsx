@@ -119,13 +119,27 @@ export default function Stream() {
       ? `https://image.tmdb.org/t/p/w780${parentMovie.posterPath}`
       : undefined;
 
-  const sources: VideoSource[] = [
-    {
-      label: "MP4 Stream",
-      url: `/api/stream/${type}/${id}`,
-      type: "mp4",
-    },
-  ];
+  // Build sources: prefer qualityUrls array from movie; always include base stream
+  const sources: VideoSource[] = [];
+  const qualityUrlsRaw = type === "movie" ? (movie as any)?.qualityUrls : null;
+  if (Array.isArray(qualityUrlsRaw) && qualityUrlsRaw.length > 0) {
+    qualityUrlsRaw.forEach((src: { label: string; fileId?: string; url?: string; type?: "mp4" | "hls" }) => {
+      if (!src?.label) return;
+      if (src.fileId) {
+        // Telegram File ID mode — stream via /api/stream/telegram/:fileId
+        sources.push({ label: src.label, url: `/api/stream/telegram/${src.fileId}`, type: "mp4" });
+      } else if (src.url) {
+        // External URL mode
+        sources.push({ label: src.label, url: src.url, type: src.type || "mp4" });
+      }
+    });
+  }
+  // Always include the built-in Telegram/HLS stream as a quality option
+  sources.push({
+    label: sources.length > 0 ? "Auto" : (type === "movie" ? movie?.quality || "HD" : "HD"),
+    url: `/api/stream/${type}/${id}`,
+    type: "mp4",
+  });
 
   const showIntro = introConfig?.hasVideo && !introDone;
 

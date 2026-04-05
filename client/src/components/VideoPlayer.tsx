@@ -362,6 +362,22 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     };
   }, [activeIndex]);
 
+  // Auto-fullscreen + landscape lock on player open
+  useEffect(() => {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.requestFullscreen) {
+      try { tg.requestFullscreen(); } catch {}
+    }
+    lockLandscape();
+    return () => {
+      const tg2 = (window as any).Telegram?.WebApp;
+      if (tg2?.exitFullscreen) {
+        try { tg2.exitFullscreen(); } catch {}
+      }
+      unlockOrientation();
+    };
+  }, []);
+
   // Fullscreen change & orientation detection
   useEffect(() => {
     const onFs = () => {
@@ -935,19 +951,24 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
               )}
             </div>
 
-            {/* Quality picker */}
-            {sources.length > 1 && (
+            {/* Quality badge / picker — always visible */}
+            {currentSrc && (
               <div className="relative z-[40]">
                 <button
-                  onClick={(e) => { e.stopPropagation(); setQualityOpen(p => !p); setSpeedOpen(false); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (sources.length > 1) { setQualityOpen(p => !p); setSpeedOpen(false); }
+                  }}
                   data-testid="player-quality"
-                  className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-white/10 border border-white/15 text-white/70 text-[10px] font-black hover:bg-white/20 transition-all"
+                  className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-white/10 border border-white/15 text-white/70 text-[10px] font-black transition-all ${sources.length > 1 ? "hover:bg-white/20 cursor-pointer" : "cursor-default"}`}
                 >
                   <Settings className="w-3 h-3" />
-                  {currentSrc?.label}
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${qualityOpen ? "rotate-180" : ""}`} />
+                  {currentSrc.label}
+                  {sources.length > 1 && (
+                    <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${qualityOpen ? "rotate-180" : ""}`} />
+                  )}
                 </button>
-                {qualityOpen && (
+                {sources.length > 1 && qualityOpen && (
                   <div
                     className="absolute bottom-full right-0 mb-3 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl shadow-black/80 min-w-[150px] z-[50]"
                     onClick={(e) => e.stopPropagation()}
