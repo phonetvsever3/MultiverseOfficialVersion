@@ -296,11 +296,14 @@ export default function Home() {
   const [showAd, setShowAd] = useState(false);
   const [pendingMovieId, setPendingMovieId] = useState<number | null>(null);
   const [fsAd, setFsAd] = useState<any>(null);
-  // Always show splash every time Home is loaded
-  const [splash, setSplash] = useState(true);
+  // Only show splash on the very first visit per session (not on back-navigation)
+  const [splash, setSplash] = useState(() => {
+    return !sessionStorage.getItem("splash_done");
+  });
   const [splashResolved] = useState(true);
 
   const handleSplashDone = () => {
+    sessionStorage.setItem("splash_done", "1");
     setSplash(false);
   };
 

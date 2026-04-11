@@ -282,7 +282,15 @@ export async function startBot() {
       } catch (e) {}
     }
 
-    await botInstance?.sendMessage(chatId, `❌ The file for ID ${id} is currently unavailable. Use the app to stream it instead.`, {
+    // File can't be delivered directly — fall back to movie card with stream link
+    const fallbackMovie = await storage.getMovie(id);
+    if (fallbackMovie) {
+      await sendMovieCard(chatId, fallbackMovie);
+      return;
+    }
+
+    // Nothing found at all
+    await botInstance?.sendMessage(chatId, `❌ Content with ID ${id} was not found.`, {
       reply_markup: await getMainKeyboard(),
     });
   }
@@ -535,15 +543,28 @@ export async function startBot() {
     if (channel?.role === 'source') {
       const video = msg.video || msg.document;
       if (video) {
+        const fileSize = video.file_size || 0;
+        const MIN_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
+        if (fileSize < MIN_FILE_BYTES) {
+          await storage.updateChannel(channel.id, { lastMessageId: msg.message_id });
+          return;
+        }
         const existing = await storage.getSyncedFileByUniqueId(video.file_unique_id);
         if (!existing) {
+          const rawCaption = msg.caption?.split('\n')[0]?.trim();
+          const rawFileName = (video as any).file_name as string | undefined;
+          const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
+          const isGeneric = !rawFileName || GENERIC_NAME.test(rawFileName.trim());
+          const { normalizeFileName } = await import("./unicode-normalize");
+          const rawName = (rawCaption && rawCaption.length > 2 ? rawCaption : null) || (isGeneric ? null : rawFileName) || rawFileName || (msg.video ? 'Video' : 'File');
+          const fileName = normalizeFileName(rawName);
           const syncedFile = await storage.createSyncedFile({
             channelId: String(msg.chat.id),
             messageId: msg.message_id,
             fileId: video.file_id,
             fileUniqueId: video.file_unique_id,
-            fileName: (video as any).file_name || (msg.video ? 'Video' : 'File'),
-            fileSize: video.file_size || 0,
+            fileName,
+            fileSize,
             mimeType: (video as any).mime_type || 'application/octet-stream',
           });
           // Auto-add to movie library if enabled (movies only, TMDB match required)

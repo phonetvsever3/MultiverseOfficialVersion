@@ -347,7 +347,7 @@ export async function scanChannelMtproto(
   if (maxMsgId <= 0) {
     console.log("[scanChannelMtproto] Auto-detecting latest message ID...");
     const detected = await getChannelLatestMsgId(client, channelId);
-    maxMsgId = detected > 0 ? detected : 5000;
+    maxMsgId = detected > 0 ? detected : 100000;
     console.log(`[scanChannelMtproto] Latest message ID: ${maxMsgId}`);
     onProgress?.(0, maxMsgId); // report real total immediately
   }
@@ -406,14 +406,29 @@ export async function scanChannelMtproto(
       const fileId = buildTelegramFileId(documentId, accessHash, fileReference, dcId, fileType);
       const fileUniqueId = buildTelegramFileUniqueId(documentId, fileType);
 
-      let fileName = `File_${msg.id}`;
+      let attrFileName = `File_${msg.id}`;
       if (doc.attributes) {
         for (const attr of doc.attributes) {
-          if (attr.fileName) { fileName = attr.fileName; break; }
-          if (attr.title) { fileName = attr.title; break; }
+          if (attr.fileName) { attrFileName = attr.fileName; break; }
+          if (attr.title) { attrFileName = attr.title; break; }
         }
       }
-      if (!fileName && msg.message) fileName = msg.message.slice(0, 64) || fileName;
+      // Caption is ALWAYS preferred — it contains the real movie/show title.
+      // Only fall back to the file attribute name when caption is absent and the
+      // attribute name looks like a real title (not a generic/placeholder name).
+      const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
+      const msgCaption = (msg.message as string | undefined)?.split('\n')[0]?.trim();
+      const attrIsGeneric = GENERIC_NAME.test(attrFileName.trim()) || attrFileName === `File_${msg.id}`;
+      let rawFileName: string;
+      if (msgCaption && msgCaption.length > 2) {
+        rawFileName = msgCaption;
+      } else if (!attrIsGeneric) {
+        rawFileName = attrFileName;
+      } else {
+        rawFileName = `File_${msg.id}`;
+      }
+      const { normalizeFileName } = await import("./unicode-normalize");
+      const fileName = normalizeFileName(rawFileName);
 
       try {
         await onFile({

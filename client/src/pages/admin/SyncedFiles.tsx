@@ -1,6 +1,6 @@
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { FileVideo, Trash2, Database, PlusCircle, CheckCircle2, Download, Film, Sparkles, Tv, Info, Wand2, Search, Globe, Loader2, X, Zap, AlertCircle, Pencil, Check, Copy, ExternalLink, ArrowUpAZ, ArrowDownAZ, Filter, CalendarDays, Hash, ChevronLeft, ChevronRight, Library, LibraryBig, CopyX, RotateCcw } from "lucide-react";
+import { FileVideo, Trash2, Database, PlusCircle, CheckCircle2, Download, Film, Sparkles, Tv, Info, Wand2, Search, Globe, Loader2, X, Zap, AlertCircle, Pencil, Check, Copy, ExternalLink, ArrowUpAZ, ArrowDownAZ, Filter, CalendarDays, Hash, ChevronLeft, ChevronRight, Library, LibraryBig, CopyX, RotateCcw, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -217,6 +217,7 @@ export default function AdminSyncedFiles() {
   const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
   const [isRemovingListed, setIsRemovingListed] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isFixingNames, setIsFixingNames] = useState(false);
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<null | { added: number; skipped: number; failed: number; total: number; addedTitles: string[]; errors: string[] }>(null);
   const [showBulkResult, setShowBulkResult] = useState(false);
@@ -261,6 +262,20 @@ export default function AdminSyncedFiles() {
       }
     } catch (err: any) { toast({ title: "Error: " + err.message, variant: "destructive" }); }
     finally { setIsRemovingListed(false); }
+  };
+
+  const handleFixNames = async () => {
+    setIsFixingNames(true);
+    try {
+      const res = await fetch("/api/synced-files/fix-names", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) { toast({ title: d.message || "Failed to fix names", variant: "destructive" }); }
+      else {
+        toast({ title: d.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/synced-files"] });
+      }
+    } catch { toast({ title: "Network error", variant: "destructive" }); }
+    finally { setIsFixingNames(false); }
   };
 
   const handleRestoreFromLibrary = async () => {
@@ -424,6 +439,17 @@ export default function AdminSyncedFiles() {
                   >
                     {isRemovingDuplicates ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <CopyX className="w-3 h-3 mr-2" />}
                     {isRemovingDuplicates ? "Removing..." : "Remove Dupes"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full px-4 h-9 font-black text-[10px] uppercase tracking-widest hover:bg-yellow-500/10 hover:text-yellow-400 hover:border-yellow-500/30 transition-all whitespace-nowrap"
+                    onClick={handleFixNames}
+                    disabled={isFixingNames}
+                    data-testid="button-fix-names"
+                  >
+                    {isFixingNames ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Tag className="w-3 h-3 mr-2" />}
+                    {isFixingNames ? "Fixing..." : "Fix Names"}
                   </Button>
                   <Button
                     variant="outline"

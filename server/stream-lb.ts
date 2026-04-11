@@ -135,6 +135,9 @@ export function registerStreamLbRoutes(app: Express) {
   app.use(async (req: Request, res: Response, next) => {
     if (!isStreamPath(req.path)) return next();
 
+    // Skip LB for requests already proxied through the LB (prevents circular loops)
+    if (req.headers['x-lb-proxy']) return next();
+
     try {
       const settings = await storage.getSettings();
       if (!settings?.lbEnabled) return next();

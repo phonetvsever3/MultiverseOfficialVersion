@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs, appUrls, streamBackends,
+  movies, episodes, channels, syncedFiles, ads, users, settings, backups, mascotSettings, footballApiKeys, viewLogs, appUrls, streamBackends, tiktokProjects,
   type Movie, type InsertMovie,
   type Episode, type InsertEpisode,
   type Channel, type SyncedFile, type InsertSyncedFile,
@@ -12,6 +12,7 @@ import {
   type FootballApiKey, type InsertFootballApiKey,
   type AppUrl, type InsertAppUrl,
   type StreamBackend, type InsertStreamBackend,
+  type TiktokProject, type InsertTiktokProject,
 } from "@shared/schema";
 import { eq, desc, sql, like, ilike, and, gte, lte, inArray, or } from "drizzle-orm";
 
@@ -111,6 +112,13 @@ export interface IStorage {
   deleteStreamBackend(id: number): Promise<void>;
   incrementStreamBackendRequestCount(id: number): Promise<void>;
   updateStreamBackendHealth(id: number, isHealthy: boolean): Promise<void>;
+
+  // TikTok Video Projects
+  getTiktokProjects(): Promise<TiktokProject[]>;
+  getTiktokProject(id: number): Promise<TiktokProject | undefined>;
+  createTiktokProject(project: InsertTiktokProject): Promise<TiktokProject>;
+  updateTiktokProject(id: number, updates: Partial<InsertTiktokProject>): Promise<TiktokProject>;
+  deleteTiktokProject(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -670,6 +678,32 @@ export class DatabaseStorage implements IStorage {
     await db.update(streamBackends)
       .set({ isHealthy, lastChecked: new Date() })
       .where(eq(streamBackends.id, id));
+  }
+
+  async getTiktokProjects(): Promise<TiktokProject[]> {
+    return await db.select().from(tiktokProjects).orderBy(desc(tiktokProjects.createdAt));
+  }
+
+  async getTiktokProject(id: number): Promise<TiktokProject | undefined> {
+    const [project] = await db.select().from(tiktokProjects).where(eq(tiktokProjects.id, id));
+    return project;
+  }
+
+  async createTiktokProject(project: InsertTiktokProject): Promise<TiktokProject> {
+    const [created] = await db.insert(tiktokProjects).values(project).returning();
+    return created;
+  }
+
+  async updateTiktokProject(id: number, updates: Partial<InsertTiktokProject>): Promise<TiktokProject> {
+    const [updated] = await db.update(tiktokProjects)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tiktokProjects.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteTiktokProject(id: number): Promise<void> {
+    await db.delete(tiktokProjects).where(eq(tiktokProjects.id, id));
   }
 }
 

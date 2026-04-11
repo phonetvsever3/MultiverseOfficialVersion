@@ -31,6 +31,7 @@ export const movies = pgTable("movies", {
   status: text("status").default("completed"),
   streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
   qualityUrls: jsonb("quality_urls"), // [{label:"1080p",url:"...",type:"mp4"|"hls"}]
+  trailerUrl: text("trailer_url"), // Custom trailer URL (YouTube link or direct video)
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -141,6 +142,7 @@ export const settings = pgTable("settings", {
   streamEnabled: boolean("stream_enabled").default(true),
   apiKey: text("api_key"),
   lbEnabled: boolean("lb_enabled").default(false),
+  tiktokAdminChatId: text("tiktok_admin_chat_id"),
 });
 
 // Mascot Settings
@@ -204,6 +206,33 @@ export const streamBackends = pgTable("stream_backends", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// TikTok Video Projects
+export const tiktokProjects = pgTable("tiktok_projects", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull().default("Untitled Project"),
+  niche: text("niche").default(""),
+  hookText: text("hook_text").notNull().default(""),
+  hookEmoji: text("hook_emoji").default("🔥"),
+  bodyPoints: jsonb("body_points").$type<string[]>().default([]),
+  ctaText: text("cta_text").notNull().default("Follow for more!"),
+  backgroundColor: text("background_color").notNull().default("#0a0a0a"),
+  backgroundStyle: text("background_style").notNull().default("gradient"),
+  gradientFrom: text("gradient_from").notNull().default("#1a1a2e"),
+  gradientTo: text("gradient_to").notNull().default("#16213e"),
+  textColor: text("text_color").notNull().default("#ffffff"),
+  accentColor: text("accent_color").notNull().default("#ff0050"),
+  hookFontSize: integer("hook_font_size").notNull().default(52),
+  bodyFontSize: integer("body_font_size").notNull().default(26),
+  ctaFontSize: integer("cta_font_size").notNull().default(30),
+  fontWeight: text("font_weight").notNull().default("bold"),
+  textAlign: text("text_align").notNull().default("center"),
+  showEmoji: boolean("show_emoji").notNull().default(true),
+  overlayStyle: text("overlay_style").notNull().default("none"),
+  status: text("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Schemas
 export const insertAppUrlSchema = createInsertSchema(appUrls).omit({ id: true, createdAt: true, visitCount: true });
 export const insertStreamBackendSchema = createInsertSchema(streamBackends).omit({ id: true, createdAt: true, requestCount: true });
@@ -246,3 +275,6 @@ export type AppUrl = typeof appUrls.$inferSelect;
 export type InsertAppUrl = z.infer<typeof insertAppUrlSchema>;
 export type StreamBackend = typeof streamBackends.$inferSelect;
 export type InsertStreamBackend = z.infer<typeof insertStreamBackendSchema>;
+export const insertTiktokProjectSchema = createInsertSchema(tiktokProjects).omit({ id: true, createdAt: true, updatedAt: true });
+export type TiktokProject = typeof tiktokProjects.$inferSelect;
+export type InsertTiktokProject = z.infer<typeof insertTiktokProjectSchema>;

@@ -24,6 +24,8 @@ import EpisodeChecker from "@/pages/admin/EpisodeChecker";
 import AdminFileStreamBot from "@/pages/admin/FileStreamBot";
 import StreamBackendsPage from "@/pages/admin/StreamBackends";
 import ServerStatsPage from "@/pages/admin/ServerStats";
+import TikTokDashboard from "@/pages/admin/TikTokDashboard";
+import TikTokEditor from "@/pages/admin/TikTokEditor";
 
 // Mini App Pages
 import MovieView from "@/pages/app/MovieView";
@@ -93,6 +95,8 @@ function Router() {
       <Route path="/admin/file-stream-bot">{() => <ProtectedRoute component={AdminFileStreamBot} />}</Route>
       <Route path="/admin/stream-backends">{() => <ProtectedRoute component={StreamBackendsPage} />}</Route>
       <Route path="/admin/server-stats">{() => <ProtectedRoute component={ServerStatsPage} />}</Route>
+      <Route path="/admin/tiktok">{() => <ProtectedRoute component={TikTokDashboard} />}</Route>
+      <Route path="/admin/tiktok/editor/:id">{() => <ProtectedRoute component={TikTokEditor} />}</Route>
 
       {/* Mini App Routes */}
       <Route path="/app" component={Home} />

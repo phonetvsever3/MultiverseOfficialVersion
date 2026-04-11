@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity } from "lucide-react";
+import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Server Monitor', href: '/admin/server-stats', icon: Activity },
+  { name: 'TikTok Generator', href: '/admin/tiktok', icon: Video },
   { name: 'URL Manager', href: '/admin/app-urls', icon: Link2 },
   { name: 'Stream LB', href: '/admin/stream-backends', icon: GitFork },
   { name: 'Users', href: '/admin/users', icon: Users },
@@ -45,7 +46,7 @@ export function AdminSidebar() {
 
       <nav className="flex-1 p-4 space-y-1">
         {navigation.map((item) => {
-          const isActive = location === item.href;
+          const isActive = location === item.href || (item.href !== '/admin' && location.startsWith(item.href));
           return (
             <Link key={item.name} href={item.href}>
               <div

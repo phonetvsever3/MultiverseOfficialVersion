@@ -628,7 +628,7 @@ export default function AdminMovies() {
           setMovieCast([]);
           setQualityUrlsList([]);
           form.reset();
-          toast({ title: "Added successfully" });
+          toast({ title: "Movie added successfully!" });
         }
       });
     }
@@ -679,15 +679,23 @@ export default function AdminMovies() {
               <span className="ml-2 hidden sm:inline">Remove Dupes</span>
             </Button>
 
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={open} onOpenChange={(val) => {
+              setOpen(val);
+              if (!val) { setEditingMovie(null); setMovieCast([]); setQualityUrlsList([]); form.reset(); }
+            }}>
               <DialogTrigger asChild>
-                <Button className="bg-primary hover:bg-primary/90 text-white font-black shadow-xl h-11 px-6 rounded-xl">
+                <Button
+                  className="bg-primary hover:bg-primary/90 text-white font-black shadow-xl h-11 px-6 rounded-xl"
+                  onClick={() => { setEditingMovie(null); setMovieCast([]); setQualityUrlsList([]); form.reset({ type: "movie", quality: "720p", title: "", overview: "", posterPath: "", genre: "", releaseDate: "", tmdbId: undefined, fileId: "", fileSize: 0, fileUniqueId: "manual_" + Math.random().toString(36).substring(7) }); }}
+                >
                   <Plus className="w-5 h-5 mr-2" /> ADD MOVIE
                 </Button>
               </DialogTrigger>
               <DialogContent className="bg-card border-border max-w-xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle className="text-2xl font-black">Add Content</DialogTitle>
+                  <DialogTitle className="text-2xl font-black">
+                    {editingMovie ? `Edit: ${editingMovie.title}` : "Add Content"}
+                  </DialogTitle>
                 </DialogHeader>
                 <Form {...form}>
                   <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-4">

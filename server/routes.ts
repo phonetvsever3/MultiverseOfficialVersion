@@ -17,6 +17,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import { generateAndSendTikTok, type MusicStyle } from "./tiktok-video";
 import { startBot, broadcastMovieNotification, broadcastEpisodeNotification } from "./bot";
 import { seed } from "./seed";
 import { db } from "./db";
@@ -293,6 +294,9 @@ export async function registerRoutes(
         }).catch(() => {});
       }
 
+      // TikTok video generation (runs async, never blocks response)
+      generateAndSendTikTok(movie).catch(() => {});
+
       res.status(201).json(movie);
     } catch (e) {
       res.status(400).json({ message: "Invalid input" });
@@ -495,7 +499,7 @@ export async function registerRoutes(
         const overrideMax = req.query?.maxMsgId ? parseInt(req.query.maxMsgId as string) : 0;
         const maxMsgId = overrideMax > 0
           ? overrideMax
-          : (channel.lastMessageId && channel.lastMessageId > 0 ? channel.lastMessageId : 5000);
+          : (channel.lastMessageId && channel.lastMessageId > 0 ? channel.lastMessageId : 100000);
 
         let scanned = 0;
         prog.maxId = maxMsgId;
@@ -581,14 +585,17 @@ export async function registerRoutes(
                   `(Bot API: "${fwdData.description}". MTProto also failed: ${lastMtError})`
                 );
               }
-              // Switch to MTProto scan — pass 0 so it auto-detects the real max message ID
+              // Switch to MTProto scan — pass maxMsgId so it uses the already-known ceiling
               prog.message = "MTProto fallback: detecting channel history size...";
+              prog.maxId = maxMsgId;
               await scanChannelMtproto(
                 client,
                 botApiId,
-                0,
+                maxMsgId,
                 async (fileInfo) => {
                   prog.currentId = fileInfo.messageId;
+                  const MT_MIN_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
+                  if ((fileInfo.fileSize || 0) < MT_MIN_FILE_BYTES) { prog.skipped++; return; }
                   prog.total++;
                   try {
                     const existing = await storage.getSyncedFileByUniqueId(fileInfo.fileUniqueId);
@@ -637,19 +644,28 @@ export async function registerRoutes(
           if (!fwdDoc?.file_id) { await new Promise(r => setTimeout(r, 100)); continue; }
 
           // ── 3. Save the document (failures here are real failures) ──────────
+          const docFileSize = fwdDoc.file_size || 0;
+          const MIN_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
+          if (docFileSize < MIN_FILE_BYTES) { prog.skipped++; continue; }
           prog.total++;
           try {
             const existing = await storage.getSyncedFileByUniqueId(fwdDoc.file_unique_id);
             if (existing) { prog.skipped++; continue; }
 
-            const fileName = fwdDoc.file_name || fwdMsg.caption || `File_${msgId}`;
+            const rawCaption = fwdMsg.caption?.split('\n')[0]?.trim();
+            const rawFileName = fwdDoc.file_name as string | undefined;
+            const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
+            const isGeneric = !rawFileName || GENERIC_NAME.test(rawFileName.trim());
+            const { normalizeFileName } = await import("./unicode-normalize");
+            const rawName = (rawCaption && rawCaption.length > 2 ? rawCaption : null) || (isGeneric ? null : rawFileName) || rawFileName || `File_${msgId}`;
+            const fileName = normalizeFileName(rawName);
             const syncedFile = await storage.createSyncedFile({
               channelId: botApiId,
               messageId: msgId,
               fileId: fwdDoc.file_id,
               fileUniqueId: fwdDoc.file_unique_id,
               fileName,
-              fileSize: fwdDoc.file_size || 0,
+              fileSize: docFileSize,
               mimeType: fwdDoc.mime_type || "application/octet-stream",
             });
             prog.added++;
@@ -1239,7 +1255,8 @@ export async function registerRoutes(
     if (!fileName || typeof fileName !== "string" || !fileName.trim()) {
       return res.status(400).json({ message: "fileName is required" });
     }
-    const updated = await storage.updateSyncedFileName(id, fileName.trim());
+    const { normalizeFileName } = await import("./unicode-normalize");
+    const updated = await storage.updateSyncedFileName(id, normalizeFileName(fileName.trim()));
     if (!updated) return res.status(404).json({ message: "File not found" });
     res.json(updated);
   });
@@ -1435,6 +1452,56 @@ export async function registerRoutes(
         await storage.deleteSyncedFile(id);
       }
       res.json({ removed: toDelete.length, message: `Removed ${toDelete.length} duplicate file(s).` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Bulk-fix generic filenames by looking up matching movies/episodes in the library
+  app.post("/api/synced-files/fix-names", async (_req, res) => {
+    try {
+      const { normalizeFileName } = await import("./unicode-normalize");
+      const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed|File_\d+)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
+      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
+
+      // Build lookup maps from library
+      const allMoviesRaw = await db.select({ id: movies.id, title: movies.title, quality: movies.quality, fileUniqueId: movies.fileUniqueId }).from(movies);
+      const movieByUniqueId = new Map(allMoviesRaw.filter(m => m.fileUniqueId).map(m => [m.fileUniqueId!, m]));
+
+      const allEpisodesRaw = await db.select({ id: episodes.id, title: episodes.title, seasonNumber: episodes.seasonNumber, episodeNumber: episodes.episodeNumber, fileUniqueId: episodes.fileUniqueId }).from(episodes);
+      const epByUniqueId = new Map(allEpisodesRaw.map(e => [e.fileUniqueId, e]));
+
+      let fixed = 0;
+      for (const file of allFiles) {
+        let newName: string | null = null;
+        const isGeneric = !file.fileName || GENERIC_NAME.test(file.fileName.trim());
+
+        if (isGeneric) {
+          // Try to get the real name from the library
+          const movie = movieByUniqueId.get(file.fileUniqueId);
+          if (movie) {
+            newName = `${movie.title}${movie.quality ? ` (${movie.quality})` : ""}.mp4`;
+          } else {
+            const ep = epByUniqueId.get(file.fileUniqueId);
+            if (ep) {
+              const s = String(ep.seasonNumber ?? 1).padStart(2, "0");
+              const e = String(ep.episodeNumber ?? 1).padStart(2, "0");
+              newName = `S${s}E${e}${ep.title ? ` - ${ep.title}` : ""}.mp4`;
+            }
+          }
+        } else {
+          // Normalize Unicode styled chars (bold, italic, etc.) to plain ASCII
+          const normalized = normalizeFileName(file.fileName);
+          if (normalized !== file.fileName) newName = normalized;
+        }
+
+        if (newName) {
+          await storage.updateSyncedFileName(file.id, normalizeFileName(newName));
+          fixed++;
+        }
+      }
+
+      res.json({ fixed, total: allFiles.length, message: `Fixed ${fixed} of ${allFiles.length} filename(s).` });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -3013,6 +3080,83 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[Telegram stream]", err);
       if (!res.headersSent) res.status(err.status || 500).send(err.message);
+    }
+  });
+
+  // ─── TikTok Video Projects ───────────────────────────────────────────────
+  app.get("/api/admin/tiktok/projects", requireAdmin, async (_req, res) => {
+    try {
+      const projects = await storage.getTiktokProjects();
+      res.json(projects);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/tiktok/projects/:id", requireAdmin, async (req, res) => {
+    try {
+      const project = await storage.getTiktokProject(Number(req.params.id));
+      if (!project) return res.status(404).json({ message: "Project not found" });
+      res.json(project);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/tiktok/projects", requireAdmin, async (req, res) => {
+    try {
+      const project = await storage.createTiktokProject(req.body);
+      res.status(201).json(project);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/tiktok/projects/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id: _id, createdAt: _ca, updatedAt: _ua, ...updates } = req.body;
+      const project = await storage.updateTiktokProject(Number(req.params.id), updates);
+      res.json(project);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/tiktok/projects/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteTiktokProject(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Manually send TikTok promo for any existing movie
+  app.post("/api/admin/tiktok/send-promo/:movieId", requireAdmin, async (req, res) => {
+    try {
+      const movie = await storage.getMovie(Number(req.params.movieId));
+      if (!movie) return res.status(404).json({ message: "Movie not found" });
+      const validStyles = ["cinematic", "action", "drama", "mystery"];
+      const style = validStyles.includes(req.query.style as string)
+        ? (req.query.style as MusicStyle)
+        : "cinematic";
+      const clipPercent = typeof req.body.clipPercent === "number"
+        ? Math.min(Math.max(req.body.clipPercent, 0), 0.90)
+        : 0.42;
+      const customAudioUrl = typeof req.body.customAudioUrl === "string"
+        ? req.body.customAudioUrl.trim()
+        : "";
+      const channelHandle = typeof req.body.channelHandle === "string"
+        ? req.body.channelHandle.trim()
+        : "MultiverseMovies_Bot";
+      await generateAndSendTikTok(movie, style, {
+        clipPercent,
+        customAudioUrl: customAudioUrl || undefined,
+        channelHandle: channelHandle || "MultiverseMovies_Bot",
+      });
+      res.json({ success: true, message: `Promo sent for "${movie.title}"` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSettingsSchema, type Settings } from "@shared/schema";
-import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap, Database } from "lucide-react";
+import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap, Database, Video } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -417,6 +417,7 @@ export default function AdminSettings() {
       fsbBaseUrl: settings?.fsbBaseUrl || "",
       fsbHashLength: settings?.fsbHashLength ?? 6,
       apiKey: settings?.apiKey || "",
+      tiktokAdminChatId: settings?.tiktokAdminChatId || "",
     }
   });
 
@@ -437,6 +438,7 @@ export default function AdminSettings() {
         fsbBaseUrl: settings.fsbBaseUrl || "",
         fsbHashLength: settings.fsbHashLength ?? 6,
         apiKey: settings.apiKey || "",
+        tiktokAdminChatId: settings.tiktokAdminChatId || "",
       });
       setPackages(settings.supportPackages || []);
     }
@@ -634,6 +636,52 @@ export default function AdminSettings() {
                         </FormItem>
                       )}
                     />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* TikTok Video Generator */}
+              <Card className="hover-elevate border-pink-500/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Video className="h-5 w-5 text-pink-400" />
+                    TikTok Video Generator
+                  </CardTitle>
+                  <CardDescription>
+                    When a new movie is added, the bot automatically generates a cinematic 9:16 TikTok-style video and sends it to the chat or channel below. The bot must be an admin of the target channel.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="tiktokAdminChatId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="flex items-center gap-2">
+                          <Hash className="h-3.5 w-3.5 text-pink-400" />
+                          Target Chat / Channel ID
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            value={field.value ?? ""}
+                            placeholder="-1001234567890 or @mychannel"
+                            className="font-mono"
+                            data-testid="input-tiktok-chat-id"
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">
+                          Enter the numeric chat ID (e.g. <code className="bg-muted px-1 rounded">-1001234567890</code>) or a public channel username (e.g. <code className="bg-muted px-1 rounded">@mychannel</code>). Leave blank to disable TikTok video generation.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="rounded-xl bg-pink-500/5 border border-pink-500/20 px-4 py-3 text-xs text-muted-foreground space-y-1">
+                    <p className="font-semibold text-pink-400">How it works</p>
+                    <p>• Poster is downloaded and processed with FFmpeg into a 1080×1920 MP4</p>
+                    <p>• Effects: blurred background, Ken Burns zoom, fade in/out, text overlays</p>
+                    <p>• Add background music at <code className="bg-muted px-1 rounded">tiktok_generator/assets/background_music.mp3</code></p>
                   </div>
                 </CardContent>
               </Card>

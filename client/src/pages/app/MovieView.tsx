@@ -45,8 +45,18 @@ export default function MovieView() {
 
   const { data: trailer } = useQuery<TrailerInfo | null>({
     queryKey: [`/api/movies/${movieId}/trailer`],
-    enabled: !!movie && !!movie.tmdbId,
+    enabled: !!movie && !!movie.tmdbId && !movie.trailerUrl,
   });
+
+  // Extract YouTube video ID from various URL formats
+  const getYouTubeId = (url: string): string | null => {
+    const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    return match ? match[1] : null;
+  };
+
+  const customTrailerYouTubeId = movie?.trailerUrl ? getYouTubeId(movie.trailerUrl) : null;
+  const isCustomTrailerDirect = !!movie?.trailerUrl && !customTrailerYouTubeId;
+  const hasTrailer = !!(movie?.trailerUrl || trailer);
 
   const { data: recommendedData } = useQuery<{ items: Movie[]; total: number }>({
     queryKey: [`/api/browse`, movie?.type, "rating", "", "", 1],
@@ -264,17 +274,27 @@ export default function MovieView() {
         </div>
 
         {/* Trailer Button */}
-        {trailer && (
+        {hasTrailer && (
           <div className="w-full max-w-sm mb-6 px-4">
             {showTrailer ? (
               <div className="relative w-full rounded-2xl overflow-hidden aspect-video bg-black border border-white/10">
-                <iframe
-                  className="w-full h-full"
-                  src={`https://www.youtube.com/embed/${trailer.key}?autoplay=1&rel=0`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  title={trailer.name}
-                />
+                {isCustomTrailerDirect ? (
+                  <video
+                    className="w-full h-full"
+                    src={movie!.trailerUrl!}
+                    autoPlay
+                    controls
+                    playsInline
+                  />
+                ) : (
+                  <iframe
+                    className="w-full h-full"
+                    src={`https://www.youtube.com/embed/${customTrailerYouTubeId || trailer?.key}?autoplay=1&rel=0`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    title={movie?.title || trailer?.name}
+                  />
+                )}
                 <button
                   onClick={() => setShowTrailer(false)}
                   className="absolute top-2 right-2 w-8 h-8 bg-black/70 rounded-full flex items-center justify-center hover:bg-black/90 transition-all"
