@@ -95,11 +95,29 @@ export async function startBot() {
 
   const MAIN_KEYBOARD = webAppHome ? buildKeyboard(webAppHome) : FALLBACK_KEYBOARD;
 
+  // Track conflict back-off so we don't spam restarts
+  let conflictBackoffTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Handle polling errors (conflict, network issues, etc.)
   botInstance.on('polling_error', (err: any) => {
     const msg = err?.message || String(err);
     if (msg.includes('409') || msg.includes('Conflict')) {
-      console.error("[Bot] Polling conflict detected. Another instance is running.");
+      // Another instance is polling — stop THIS instance immediately so it
+      // doesn't process and duplicate-reply to any messages.
+      if (botInstance) {
+        botInstance.stopPolling({ cancel: true }).catch(() => {});
+      }
+      if (!conflictBackoffTimer) {
+        console.log("[Bot] Conflict — pausing polling for 30 s to let other instance take over.");
+        conflictBackoffTimer = setTimeout(async () => {
+          conflictBackoffTimer = null;
+          // Only restart if this module's instance hasn't been replaced
+          if (botInstance) {
+            console.log("[Bot] Attempting to resume polling…");
+            try { await botInstance.startPolling(); } catch (_) {}
+          }
+        }, 30_000);
+      }
     } else if (msg.includes('ETELEGRAM') || msg.includes('EFATAL')) {
       console.error("[Bot] Fatal polling error:", msg);
     } else {

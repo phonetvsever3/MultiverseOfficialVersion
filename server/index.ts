@@ -52,7 +52,7 @@ app.use(
     secret: process.env.SESSION_SECRET || "cinebot-admin-secret-key-2024",
     resave: false,
     saveUninitialized: false,
-    store: new SessionStore({ checkPeriod: 86400000 }),
+    store: new SessionStore({ checkPeriod: 3600000, max: 500 }),
     cookie: {
       httpOnly: true,
       secure: false,
@@ -134,4 +134,13 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // Graceful shutdown — ensures the port is released before the process exits
+  // so that a restarted instance doesn't hit EADDRINUSE
+  const shutdown = () => {
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5000).unref();
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 })();

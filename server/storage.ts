@@ -549,11 +549,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDashboardStats() {
-    const [moviesCount] = await db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'movie'));
-    const [seriesCount] = await db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'series'));
-    const [viewsCount] = await db.select({ sum: sql<number>`sum(${movies.views})` }).from(movies);
-    const [adsCount] = await db.select({ count: sql<number>`count(*)` }).from(ads).where(eq(ads.isActive, true));
-    const [usersCount] = await db.select({ count: sql<number>`count(*)` }).from(users);
+    const [
+      [moviesCount],
+      [seriesCount],
+      [viewsCount],
+      [adsCount],
+      [usersCount],
+    ] = await Promise.all([
+      db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'movie')),
+      db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'series')),
+      db.select({ sum: sql<number>`sum(${movies.views})` }).from(movies),
+      db.select({ count: sql<number>`count(*)` }).from(ads).where(eq(ads.isActive, true)),
+      db.select({ count: sql<number>`count(*)` }).from(users),
+    ]);
 
     return {
       totalMovies: Number(moviesCount?.count || 0),

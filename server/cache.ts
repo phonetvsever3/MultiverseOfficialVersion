@@ -4,6 +4,7 @@ interface CacheEntry {
   ttlMs: number;
 }
 
+const MAX_CACHE_ENTRIES = 200;
 const store: Record<string, CacheEntry> = {};
 
 export function normalizeKey(raw: string): string {
@@ -22,6 +23,12 @@ export function getCached(key: string): unknown | null {
 }
 
 export function setCache(key: string, data: unknown, ttlMs: number): void {
+  // Evict oldest entries if we're at the cap
+  const keys = Object.keys(store);
+  if (keys.length >= MAX_CACHE_ENTRIES) {
+    const oldest = keys.sort((a, b) => store[a].cachedAt - store[b].cachedAt).slice(0, 20);
+    for (const k of oldest) delete store[k];
+  }
   store[key] = { data, cachedAt: Date.now(), ttlMs };
 }
 

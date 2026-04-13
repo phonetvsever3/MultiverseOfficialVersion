@@ -24,11 +24,13 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { movies, episodes, channels, syncedFiles, users, ads, settings, mascotSettings, footballApiKeys, backups, appUrls, viewLogs } from "@shared/schema";
 import { performBackup } from "./github-backup";
-import { initializeAutoBackup } from "./backup-scheduler";
+import { performTelegramDbBackup } from "./telegram-db-backup";
+import { initializeAutoBackup, initializeTelegramBackup } from "./backup-scheduler";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import v8 from "v8";
 import { spawn } from "child_process";
 import { getCached, setCache, invalidatePrefix, normalizeKey, TTL } from "./cache";
 import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } from "./channel";
@@ -756,19 +758,27 @@ export async function registerRoutes(
 
   // Stats
   app.get(api.stats.dashboard.path, async (req, res) => {
-    const stats = await storage.getDashboardStats();
-    const userStats = await storage.getUserStats();
-    res.json({
-      ...stats,
-      totalUsers: userStats.totalUsers,
-    });
+    const cacheKey = "admin:dashboard-stats";
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    const [stats, userStats] = await Promise.all([
+      storage.getDashboardStats(),
+      storage.getUserStats(),
+    ]);
+    const result = { ...stats, totalUsers: userStats.totalUsers };
+    setCache(cacheKey, result, 60 * 1000); // cache for 60 seconds
+    res.json(result);
   });
 
   // Admin: daily/monthly view stats for charts
   app.get("/api/admin/view-stats", async (req, res) => {
     const period = (req.query.period as string) || "7d";
     const days = period === "30d" ? 30 : 7;
+    const cacheKey = `admin:view-stats:${days}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const data = await storage.getViewStats(days);
+    setCache(cacheKey, data, 5 * 60 * 1000); // cache for 5 minutes
     res.json(data);
   });
 
@@ -837,6 +847,7 @@ export async function registerRoutes(
       ramPercent: Math.round((usedMem / totalMem) * 100),
       heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
       heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+      heapSizeLimit: Math.round(v8.getHeapStatistics().heap_size_limit / 1024 / 1024),
       rss: Math.round(mem.rss / 1024 / 1024),
       uptime: Math.round(os.uptime()),
       processUptime: Math.round(process.uptime()),
@@ -890,6 +901,10 @@ export async function registerRoutes(
   // Admin: episode gap checker — find series with missing/un-uploaded episodes
   app.get("/api/admin/episode-gaps", async (_req, res) => {
     try {
+      const cacheKey = "admin:episode-gaps";
+      const cached = getCached(cacheKey);
+      if (cached) return res.json(cached);
+
       const today = new Date().toISOString().slice(0, 10);
 
       // Get all episodes grouped by movie
@@ -988,6 +1003,7 @@ export async function registerRoutes(
       }
 
       result.sort((a, b) => b.totalMissing - a.totalMissing);
+      setCache(cacheKey, result, 5 * 60 * 1000); // cache for 5 minutes
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1041,6 +1057,15 @@ export async function registerRoutes(
     // Restart bot with new token if it was updated
     if (req.body.botToken) {
       startBot().catch(console.error);
+    }
+    // Reinitialize Telegram backup if those settings changed
+    if (
+      req.body.telegramBackupChannelId !== undefined ||
+      req.body.telegramAutoDbBackupEnabled !== undefined
+    ) {
+      if (settings?.telegramAutoDbBackupEnabled && settings?.telegramBackupChannelId && settings?.botToken) {
+        initializeTelegramBackup().catch(console.error);
+      }
     }
     res.json(settings);
   });
@@ -1340,11 +1365,18 @@ export async function registerRoutes(
 
       const apiBase = `https://api.telegram.org/bot${token}`;
 
-      // Fetch all synced files
-      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
       let success = 0;
       let failed = 0;
       const errors: string[] = [];
+
+      // Process in batches of 500 to avoid loading 100K rows into memory at once
+      const BATCH_SIZE = 500;
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { items: allFiles, total } = await storage.getSyncedFiles({ limit: BATCH_SIZE, offset });
+        hasMore = offset + allFiles.length < total;
+        offset += allFiles.length;
 
       for (const file of allFiles) {
         try {
@@ -1390,6 +1422,7 @@ export async function registerRoutes(
           failed++;
         }
       }
+      } // end while batch
 
       res.json({ success: true, refreshed: success, failed, errors: errors.slice(0, 20) });
     } catch (err: any) {
@@ -1433,25 +1466,19 @@ export async function registerRoutes(
     }
   });
 
-  // Remove duplicate synced files (same fileName, keep newest)
+  // Remove duplicate synced files (same fileName, keep newest) — pure SQL, no full table scan in JS
   app.post("/api/synced-files/remove-duplicates", async (_req, res) => {
     try {
-      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
-      const seen = new Map<string, number>(); // fileName -> newest id
-      const toDelete: number[] = [];
-      // Sort ascending so we see oldest first
-      const sorted = [...allFiles].sort((a, b) => a.id - b.id);
-      for (const file of sorted) {
-        const key = (file.fileName || "").trim().toLowerCase();
-        if (seen.has(key)) {
-          toDelete.push(seen.get(key)!); // delete the older one
-        }
-        seen.set(key, file.id); // keep replacing with the newest
-      }
-      for (const id of toDelete) {
-        await storage.deleteSyncedFile(id);
-      }
-      res.json({ removed: toDelete.length, message: `Removed ${toDelete.length} duplicate file(s).` });
+      const result = await db.execute(sql`
+        DELETE FROM synced_files
+        WHERE id NOT IN (
+          SELECT MAX(id)
+          FROM synced_files
+          GROUP BY LOWER(TRIM(COALESCE(file_name, '')))
+        )
+      `);
+      const removed = (result as any).rowCount ?? 0;
+      res.json({ removed, message: `Removed ${removed} duplicate file(s).` });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -1462,7 +1489,7 @@ export async function registerRoutes(
     try {
       const { normalizeFileName } = await import("./unicode-normalize");
       const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed|File_\d+)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
-      const { items: allFiles } = await storage.getSyncedFiles({ limit: 100000 });
+      const { items: allFiles } = await storage.getSyncedFiles({ limit: 10000 });
 
       // Build lookup maps from library
       const allMoviesRaw = await db.select({ id: movies.id, title: movies.title, quality: movies.quality, fileUniqueId: movies.fileUniqueId }).from(movies);
@@ -2373,6 +2400,19 @@ export async function registerRoutes(
         success: false, 
         message: error.message 
       });
+    }
+  });
+
+  app.post("/api/backup/telegram", requireAdmin, async (_req, res) => {
+    try {
+      const result = await performTelegramDbBackup();
+      if (result.success) {
+        res.json({ success: true, message: result.message });
+      } else {
+        res.status(400).json({ success: false, message: result.message });
+      }
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 

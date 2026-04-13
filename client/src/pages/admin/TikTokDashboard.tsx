@@ -68,15 +68,21 @@ function ScenePreview({ movie, trailerKey, trailerLoading, clipPercent }: {
 
   const pct1 = clipPercent !== undefined ? Math.round(clipPercent * 100) : 42;
   const pct2 = Math.min(pct1 + 20, 90);
+  const pct3 = Math.min(pct2 + 15, 95);
   const clip1Desc = trailerLoading
     ? "Fetching trailer from TMDB…"
     : trailerKey
-      ? `Clip 1 @ ${pct1}% — real audio + "NOW STREAMING" overlay`
+      ? `Clip 1 @ ${pct1}% — real audio + "NOW STREAMING"`
       : "No trailer found — animated poster zoom";
   const clip2Desc = trailerLoading
     ? "Fetching trailer…"
     : trailerKey
-      ? `Clip 2 @ ${pct2}% — real audio + "WATCH NOW" overlay`
+      ? `Clip 2 @ ${pct2}% — real audio + "WATCH NOW"`
+      : "Animated poster zoom (fallback)";
+  const clip3Desc = trailerLoading
+    ? "Fetching trailer…"
+    : trailerKey
+      ? `Clip 3 @ ${pct3}% — real audio + "MUST SEE"`
       : "Animated poster zoom (fallback)";
 
   return (
@@ -84,38 +90,71 @@ function ScenePreview({ movie, trailerKey, trailerLoading, clipPercent }: {
       <div className="flex items-center gap-2 mb-1">
         <Film className="w-3.5 h-3.5 text-muted-foreground" />
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          5-Scene Cinematic Structure · 30 sec
+          6-Scene · ~37 sec · Cinematic XFade Transitions
         </p>
       </div>
 
-      <div className="flex gap-1.5">
+      {/* Scene 1: Hook + Poster combined */}
+      <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-2 space-y-1">
+        <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Scene 1 — Hook + Poster Reveal · 9 s</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <SceneBadge
+            num="1a" label="HOOK" color="#E50914" time="0–5 s"
+            desc={`"${movie.title.toUpperCase()}" · blurred BG · gold animated title`}
+          />
+          <SceneBadge
+            num="1b" label="POSTER" color="#F59E0B" time="5–9 s"
+            desc="Full-screen poster · gold frame · genre badge · 0.2s dissolve"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-1.5">
         <SceneBadge
-          num="1" label="HOOK" color="#E50914" time="0–5 s"
-          desc={`"${movie.title.toUpperCase()}" on blurred poster — zoom + shake + glow`}
-        />
-        <SceneBadge
-          num="2" label="CLIP 1" color="#3B82F6" time="5–11 s"
+          num="2" label="CLIP 1" color="#3B82F6" time="~9–15 s"
           desc={clip1Desc}
         />
         <SceneBadge
-          num="3" label="CLIP 2" color="#8B5CF6" time="11–17 s"
+          num="3" label="CLIP 2" color="#8B5CF6" time="~15–21 s"
           desc={clip2Desc}
         />
         <SceneBadge
-          num="4" label="INFO" color="#22C55E" time="17–24 s"
-          desc={`${genre} · cast · rating — highlight panel`}
+          num="4" label="CLIP 3" color="#00D4FF" time="~21–27 s"
+          desc={clip3Desc}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <SceneBadge
+          num="5" label="INFO" color="#22C55E" time="~27–34 s"
+          desc={`${genre} · cast · rating — glass card`}
         />
         <SceneBadge
-          num="5" label="CTA" color="#EAB308" time="24–30 s"
-          desc='"Watch on @MULTIVERSE" — glow button + bounce'
+          num="6" label="CTA PRO" color="#EAB308" time="~34–37 s"
+          desc="Platform badge · pulsing button · FOMO strip · social proof"
         />
+      </div>
+
+      {/* Transition effect legend */}
+      <div className="flex flex-wrap gap-1.5 text-[9px]">
+        {[
+          { label: "Hook→Poster", fx: "dissolve", color: "yellow" },
+          { label: "Poster→Clip1", fx: "fade-black", color: "red" },
+          { label: "Clip1→Clip2", fx: "slide-left", color: "blue" },
+          { label: "Clip2→Clip3", fx: "slide-right", color: "purple" },
+          { label: "Clip3→Info", fx: "smooth-left", color: "cyan" },
+          { label: "Info→CTA", fx: "circle-open", color: "yellow" },
+        ].map(t => (
+          <span key={t.label} className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-white/50 font-mono">
+            {t.label} <span className="text-white/30">→</span> <span className="text-white/70">{t.fx}</span>
+          </span>
+        ))}
       </div>
 
       {/* Trailer preview embed */}
       {trailerKey && (
         <div className="mt-1 space-y-1.5">
           <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Play className="w-3 h-3 fill-current" /> Trailer Preview — used in Scenes 2 &amp; 3
+            <Play className="w-3 h-3 fill-current" /> Trailer Preview — used in Scenes 2, 3 &amp; 4 (6/6/6)
           </p>
           <div className="relative w-full rounded-xl overflow-hidden bg-black border border-blue-500/20" style={{ paddingBottom: "56.25%" }}>
             <img
@@ -136,20 +175,23 @@ function ScenePreview({ movie, trailerKey, trailerLoading, clipPercent }: {
           </div>
           <div className="flex gap-2 text-[10px] text-muted-foreground">
             <span className="flex-1 text-center px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
-              Clip 1 @ {pct1}% of trailer
+              Clip 1 @ {pct1}%
             </span>
             <span className="flex-1 text-center px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">
-              Clip 2 @ {pct2}% of trailer
+              Clip 2 @ {pct2}%
+            </span>
+            <span className="flex-1 text-center px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+              Clip 3 @ {pct3}%
             </span>
           </div>
-          <p className="text-[10px] text-muted-foreground text-center">Both clips include real audio · Music plays under at 30% volume</p>
+          <p className="text-[10px] text-muted-foreground text-center">All 3 clips include real audio (6/6/6) · Music plays under at 30% volume</p>
         </div>
       )}
 
       {!trailerLoading && !trailerKey && (
         <div className="flex items-center gap-2 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
           <AlertCircle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
-          <p className="text-[11px] text-yellow-400">No YouTube trailer found — Scenes 2 &amp; 3 will use animated poster zoom instead.</p>
+          <p className="text-[11px] text-yellow-400">No YouTube trailer found — Scenes 3, 4 &amp; 5 will use animated poster zoom instead.</p>
         </div>
       )}
     </div>
@@ -481,7 +523,7 @@ function GeneratorCard() {
       </Button>
       {sendMutation.isPending && (
         <p className="text-[11px] text-muted-foreground text-center -mt-3">
-          This takes ~60–120 s — downloading 2 trailer clips + audio + rendering 5 scenes…
+          This takes ~90–180 s — trailer download + 6 scenes + 6 xfade transitions…
         </p>
       )}
     </div>

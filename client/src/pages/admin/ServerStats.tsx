@@ -18,6 +18,7 @@ interface ServerStats {
   ramPercent: number;
   heapUsed: number;
   heapTotal: number;
+  heapSizeLimit: number;
   rss: number;
   uptime: number;
   processUptime: number;
@@ -260,8 +261,8 @@ export default function ServerStatsPage() {
               <StatGauge
                 label="Heap Usage"
                 value={`${stats?.heapUsed ?? 0}`}
-                unit={`/ ${stats?.heapTotal ?? 0} MB`}
-                percent={stats?.heapTotal ? Math.round((stats.heapUsed / stats.heapTotal) * 100) : 0}
+                unit={`/ ${stats?.heapSizeLimit ?? stats?.heapTotal ?? 0} MB`}
+                percent={stats?.heapSizeLimit ? Math.round((stats.heapUsed / stats.heapSizeLimit) * 100) : 0}
                 color="#a855f7"
                 icon={<Gauge className="w-4 h-4" />}
                 sub={`RSS: ${stats?.rss ?? 0} MB`}

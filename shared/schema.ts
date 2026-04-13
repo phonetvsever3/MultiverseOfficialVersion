@@ -143,6 +143,8 @@ export const settings = pgTable("settings", {
   apiKey: text("api_key"),
   lbEnabled: boolean("lb_enabled").default(false),
   tiktokAdminChatId: text("tiktok_admin_chat_id"),
+  telegramBackupChannelId: text("telegram_backup_channel_id"),
+  telegramAutoDbBackupEnabled: boolean("telegram_auto_db_backup_enabled").default(false),
 });
 
 // Mascot Settings

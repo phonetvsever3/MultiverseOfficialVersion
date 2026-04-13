@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Cloud, Loader2, Github, Save, Clock, Database, Download, Upload, AlertTriangle, Film, Clapperboard, Tv, FileVideo, Users, Megaphone, Settings, Smile, Trophy, History, BarChart2, Link2 } from "lucide-react";
+import { CheckCircle2, XCircle, Cloud, Loader2, Github, Save, Clock, Database, Download, Upload, AlertTriangle, Film, Clapperboard, Tv, FileVideo, Users, Megaphone, Settings, Smile, Trophy, History, BarChart2, Link2, Send, BotIcon } from "lucide-react";
 import { format } from "date-fns";
 import type { Backup } from "@shared/schema";
 
@@ -189,6 +191,47 @@ export default function BackupPage() {
     }
   });
 
+  // Telegram backup settings form
+  const [telegramChannelId, setTelegramChannelId] = useState<string>("");
+  const [telegramAutoEnabled, setTelegramAutoEnabled] = useState<boolean>(false);
+  const [tgSettingsInitialized, setTgSettingsInitialized] = useState(false);
+
+  if (settings && !tgSettingsInitialized) {
+    setTelegramChannelId(settings.telegramBackupChannelId || "");
+    setTelegramAutoEnabled(settings.telegramAutoDbBackupEnabled || false);
+    setTgSettingsInitialized(true);
+  }
+
+  const saveTelegramBackupSettings = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings", {
+        telegramBackupChannelId: telegramChannelId.trim(),
+        telegramAutoDbBackupEnabled: telegramAutoEnabled,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Saved", description: "Telegram backup settings updated" });
+      queryClient.invalidateQueries({ queryKey: ['/api/settings'] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Save failed", variant: "destructive" });
+    }
+  });
+
+  const telegramManualBackup = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/backup/telegram", {});
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Backup Sent!", description: data.message || "Database sent to Telegram channel" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Backup failed", variant: "destructive" });
+    }
+  });
+
   // Update settings mutation
   const updateSettingsForm = useForm({
     defaultValues: {
@@ -342,6 +385,108 @@ export default function BackupPage() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Telegram Daily DB Backup */}
+          <Card className="mb-8 border-blue-500/30">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Send className="w-5 h-5 text-blue-400" />
+                Telegram Daily DB Backup
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Automatically send a full database backup (JSON file) to a Telegram private channel every day.
+                Filename includes the date: <code className="bg-secondary px-1.5 py-0.5 rounded text-xs">multiverse-backup-YYYY-MM-DD.json</code>
+              </p>
+
+              {/* Channel ID input */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  <BotIcon className="w-4 h-4 text-blue-400" />
+                  Backup Channel ID or Username
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    data-testid="input-telegram-backup-channel"
+                    placeholder="e.g. @MyBackupChannel or -1001234567890"
+                    value={telegramChannelId}
+                    onChange={(e) => setTelegramChannelId(e.target.value)}
+                    className="flex-1 font-mono text-sm"
+                  />
+                  <Button
+                    data-testid="button-save-telegram-backup"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => saveTelegramBackupSettings.mutate()}
+                    disabled={saveTelegramBackupSettings.isPending}
+                  >
+                    {saveTelegramBackupSettings.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Make sure your bot is an admin in this channel with permission to post files.
+                </p>
+              </div>
+
+              {/* Auto backup toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border">
+                <div>
+                  <p className="text-sm font-semibold">Auto Daily Backup</p>
+                  <p className="text-xs text-muted-foreground">Runs every 24 hours automatically</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    data-testid="switch-telegram-auto-backup"
+                    checked={telegramAutoEnabled}
+                    onCheckedChange={(val) => {
+                      setTelegramAutoEnabled(val);
+                    }}
+                  />
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {telegramAutoEnabled ? "ON" : "OFF"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status indicator */}
+              {settings?.telegramBackupChannelId ? (
+                <div className="flex items-center gap-2 text-sm text-green-500 bg-green-500/10 rounded-lg px-3 py-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>
+                    Backup channel configured: <code className="text-xs bg-green-500/20 px-1 rounded">{settings.telegramBackupChannelId}</code>
+                    {settings.telegramAutoDbBackupEnabled && <span className="ml-2 text-green-400">(Auto: Daily)</span>}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-orange-500 bg-orange-500/10 rounded-lg px-3 py-2">
+                  <XCircle className="w-4 h-4 shrink-0" />
+                  <span>No backup channel configured yet</span>
+                </div>
+              )}
+
+              {/* Manual trigger */}
+              <Button
+                data-testid="button-telegram-manual-backup"
+                className="w-full"
+                onClick={() => telegramManualBackup.mutate()}
+                disabled={telegramManualBackup.isPending || !settings?.telegramBackupChannelId || !settings?.botToken}
+              >
+                {telegramManualBackup.isPending ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending backup to Telegram...</>
+                ) : (
+                  <><Send className="w-4 h-4 mr-2" />Send Backup to Telegram Now</>
+                )}
+              </Button>
+              {(!settings?.botToken) && (
+                <p className="text-xs text-orange-400 text-center">⚠ Configure your bot token in Settings first</p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Per-Table Downloads + Uploads */}
           <Card className="mb-8 border-primary/20">
