@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import {
   Cpu, MemoryStick, Activity, Clock, Server, Zap, TrendingUp, Gauge,
-  RefreshCw, Wifi
+  RefreshCw, Wifi, Trash2, CheckCircle2
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -147,9 +148,21 @@ function StatCard({
 const POLL_INTERVAL = 3000;
 const MAX_HISTORY = 40;
 
+interface CleanupResult {
+  success: boolean;
+  cacheCleared: number;
+  tempFilesDeleted: number;
+  tempBytesFreed: number;
+  heapBefore: number;
+  heapAfter: number;
+  freedMB: number;
+  gcRan: boolean;
+}
+
 export default function ServerStatsPage() {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null);
   const tickRef = useRef(0);
 
   const { data: stats, isLoading } = useQuery<ServerStats>({
@@ -179,6 +192,17 @@ export default function ServerStatsPage() {
     });
   }, [stats]);
 
+  const cleanupMutation = useMutation<CleanupResult>({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/cleanup");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setCleanupResult(data);
+      setTimeout(() => setCleanupResult(null), 8000);
+    },
+  });
+
   const cpuColor = (stats?.cpu ?? 0) > 80 ? "#ef4444" : (stats?.cpu ?? 0) > 50 ? "#f97316" : "#22c55e";
   const ramColor = (stats?.ramPercent ?? 0) > 80 ? "#ef4444" : (stats?.ramPercent ?? 0) > 60 ? "#f97316" : "#3b82f6";
 
@@ -199,12 +223,44 @@ export default function ServerStatsPage() {
                 Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
+            <button
+              data-testid="button-cleanup"
+              onClick={() => cleanupMutation.mutate()}
+              disabled={cleanupMutation.isPending}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all
+                bg-orange-500/10 border-orange-500/30 text-orange-400 hover:bg-orange-500/20 hover:border-orange-500/50
+                disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {cleanupMutation.isPending ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" />
+              )}
+              {cleanupMutation.isPending ? "Cleaning…" : "Clean RAM"}
+            </button>
             <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 px-3 py-1.5 rounded-full">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" />
               <span className="text-xs font-bold text-green-400">LIVE</span>
             </div>
           </div>
         </header>
+
+        {/* Cleanup result banner */}
+        {cleanupResult && (
+          <div className="mb-5 flex items-start gap-3 bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3 text-sm">
+            <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+              <span><span className="text-green-400 font-semibold">{cleanupResult.cacheCleared}</span> cache entries cleared</span>
+              {cleanupResult.tempFilesDeleted > 0 && (
+                <span><span className="text-green-400 font-semibold">{cleanupResult.tempFilesDeleted}</span> temp files deleted ({cleanupResult.tempBytesFreed} KB)</span>
+              )}
+              <span>Heap: <span className="text-orange-400 font-semibold">{cleanupResult.heapBefore} MB</span> → <span className="text-green-400 font-semibold">{cleanupResult.heapAfter} MB</span>
+                {cleanupResult.freedMB > 0 && <span className="text-green-400"> (freed {cleanupResult.freedMB} MB)</span>}
+              </span>
+              {cleanupResult.gcRan && <span className="text-purple-400">GC ran ✓</span>}
+            </div>
+          </div>
+        )}
 
         {isLoading && !stats ? (
           <div className="flex items-center justify-center h-64 text-muted-foreground">

@@ -20,7 +20,7 @@ import { z } from "zod";
 import { generateAndSendTikTok, type MusicStyle } from "./tiktok-video";
 import { startBot, broadcastMovieNotification, broadcastEpisodeNotification } from "./bot";
 import { seed } from "./seed";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { movies, episodes, channels, syncedFiles, users, ads, settings, mascotSettings, footballApiKeys, backups, appUrls, viewLogs } from "@shared/schema";
 import { performBackup } from "./github-backup";
@@ -32,7 +32,7 @@ import fs from "fs";
 import os from "os";
 import v8 from "v8";
 import { spawn } from "child_process";
-import { getCached, setCache, invalidatePrefix, normalizeKey, TTL } from "./cache";
+import { getCached, setCache, invalidatePrefix, normalizeKey, TTL, clearAllCache, cacheStats } from "./cache";
 import { postMovieToChannel, postFootballToChannel, type ChannelFootballMatch } from "./channel";
 import { parseMovieFileName, parseSeriesFileName, autoAddFromFile, autoAddMovieFromFile } from "./auto-add";
 import { runHealthCheck } from "./url-checker";
@@ -861,6 +861,62 @@ export async function registerRoutes(
     });
   });
 
+  // Admin: RAM / temp-file cleanup
+  app.post("/api/admin/cleanup", requireAdmin, async (_req, res) => {
+    const beforeMem = process.memoryUsage();
+    const beforeHeapMB = Math.round(beforeMem.heapUsed / 1024 / 1024);
+
+    // 1. Clear in-memory API cache
+    const cacheCleared = clearAllCache();
+
+    // 2. Delete temp files in system /tmp that belong to this process (stream chunks, etc.)
+    let tempFilesDeleted = 0;
+    let tempBytesFreed = 0;
+    try {
+      const tmpDir = os.tmpdir();
+      const files = fs.readdirSync(tmpDir);
+      for (const file of files) {
+        // Only delete files that look like our temp stream/chunk files
+        if (/^(hls-|chunk-|stream-|tg-|mv-tmp-)/.test(file)) {
+          try {
+            const filePath = `${tmpDir}/${file}`;
+            const stat = fs.statSync(filePath);
+            tempBytesFreed += stat.size;
+            fs.unlinkSync(filePath);
+            tempFilesDeleted++;
+          } catch { /* skip locked files */ }
+        }
+      }
+    } catch { /* tmpdir not accessible */ }
+
+    // 3. Trigger GC if available (needs --expose-gc flag)
+    let gcRan = false;
+    if (typeof (global as any).gc === "function") {
+      (global as any).gc();
+      gcRan = true;
+    }
+
+    // Short wait so GC + OS can reclaim memory before we measure
+    await new Promise(r => setTimeout(r, 200));
+
+    const afterMem = process.memoryUsage();
+    const afterHeapMB = Math.round(afterMem.heapUsed / 1024 / 1024);
+    const freedMB = Math.max(0, beforeHeapMB - afterHeapMB);
+
+    console.log(`[Cleanup] Cache cleared: ${cacheCleared} entries | Temp files: ${tempFilesDeleted} | Heap freed: ${freedMB} MB | GC: ${gcRan}`);
+
+    res.json({
+      success: true,
+      cacheCleared,
+      tempFilesDeleted,
+      tempBytesFreed: Math.round(tempBytesFreed / 1024),
+      heapBefore: beforeHeapMB,
+      heapAfter: afterHeapMB,
+      freedMB,
+      gcRan,
+    });
+  });
+
   // Admin: get current database URL (masked)
   app.get("/api/admin/database-url", requireAdmin, (_req, res) => {
     const url = process.env.DATABASE_URL || "";
@@ -1014,6 +1070,46 @@ export async function registerRoutes(
   app.get("/api/admin/users", async (req, res) => {
     const allUsers = await storage.getUsers();
     res.json(allUsers);
+  });
+
+  // Import users from JSON backup — adds new, updates existing, never deletes
+  app.post("/api/admin/users/import", requireAdmin, async (req, res) => {
+    const { users: incoming } = req.body as { users?: unknown[] };
+    if (!Array.isArray(incoming) || incoming.length === 0) {
+      return res.status(400).json({ message: "Body must be { users: [...] } with at least one entry" });
+    }
+
+    let added = 0, updated = 0, skipped = 0;
+
+    for (const raw of incoming) {
+      const u = raw as Record<string, unknown>;
+      const telegramId = String(u.telegramId ?? u.telegram_id ?? "").trim();
+      if (!telegramId) { skipped++; continue; }
+
+      const username = u.username ? String(u.username) : null;
+      const firstName = u.firstName ?? u.first_name ? String(u.firstName ?? u.first_name) : null;
+      const isAdmin = Boolean(u.isAdmin ?? u.is_admin ?? false);
+      const joinedAt = u.joinedAt ?? u.joined_at ?? new Date().toISOString();
+      const lastActive = u.lastActive ?? u.last_active ?? new Date().toISOString();
+
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO users (telegram_id, username, first_name, is_admin, joined_at, last_active)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             username   = EXCLUDED.username,
+             first_name = EXCLUDED.first_name,
+             last_active = GREATEST(users.last_active, EXCLUDED.last_active)
+           RETURNING (xmax = 0) AS inserted`,
+          [telegramId, username, firstName, isAdmin, joinedAt, lastActive]
+        );
+        if (rows[0]?.inserted) added++; else updated++;
+      } catch { skipped++; }
+    }
+
+    invalidatePrefix("users");
+    console.log(`[UserImport] added=${added} updated=${updated} skipped=${skipped}`);
+    res.json({ success: true, added, updated, skipped, total: incoming.length });
   });
 
   // ─── Auth Routes ─────────────────────────────────────────────────────────

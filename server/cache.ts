@@ -42,6 +42,12 @@ export function cacheStats(): { size: number; keys: string[] } {
   return { size: Object.keys(store).length, keys: Object.keys(store) };
 }
 
+export function clearAllCache(): number {
+  const count = Object.keys(store).length;
+  for (const key of Object.keys(store)) delete store[key];
+  return count;
+}
+
 setInterval(() => {
   const now = Date.now();
   let removed = 0;

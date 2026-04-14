@@ -1,13 +1,75 @@
+import { useRef, useState } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { type User } from "@shared/schema";
-import { Users, Calendar, Clock, ShieldCheck } from "lucide-react";
+import { Users, Calendar, Clock, ShieldCheck, Upload, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+
+interface ImportResult {
+  success: boolean;
+  added: number;
+  updated: number;
+  skipped: number;
+  total: number;
+}
 
 export default function UsersPage() {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
     staleTime: 1000 * 60 * 2,
   });
+
+  const importMutation = useMutation<ImportResult, Error, unknown[]>({
+    mutationFn: async (usersArray) => {
+      const res = await apiRequest("POST", "/api/admin/users/import", { users: usersArray });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Import failed");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setImportResult(data);
+      setImportError(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setTimeout(() => setImportResult(null), 10000);
+    },
+    onError: (err) => {
+      setImportError(err.message);
+      setTimeout(() => setImportError(null), 8000);
+    },
+  });
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportResult(null);
+    setImportError(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        const parsed = JSON.parse(text);
+        const arr = Array.isArray(parsed) ? parsed : parsed.users;
+        if (!Array.isArray(arr) || arr.length === 0) {
+          setImportError("File must contain a JSON array of users.");
+          return;
+        }
+        importMutation.mutate(arr);
+      } catch {
+        setImportError("Could not parse file — make sure it's valid JSON.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset so same file can be re-uploaded
+    e.target.value = "";
+  }
 
   const adminCount = users.filter(u => u.isAdmin).length;
 
@@ -15,10 +77,58 @@ export default function UsersPage() {
     <div className="min-h-screen bg-background flex">
       <AdminSidebar />
       <main className="flex-1 md:ml-64 p-6 md:p-8 overflow-y-auto">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-display text-foreground">Users</h1>
-          <p className="text-muted-foreground">All users who have started the Telegram bot.</p>
+        <header className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold font-display text-foreground">Users</h1>
+            <p className="text-muted-foreground">All users who have started the Telegram bot.</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,.txt"
+              className="hidden"
+              onChange={handleFileChange}
+              data-testid="input-import-users"
+            />
+            <button
+              data-testid="button-import-users"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all
+                bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/50
+                disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {importMutation.isPending ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {importMutation.isPending ? "Importing…" : "Import Users"}
+            </button>
+          </div>
         </header>
+
+        {/* Import result / error banners */}
+        {importResult && (
+          <div className="mb-5 flex items-start gap-3 bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3 text-sm">
+            <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+              <span>Imported <span className="font-semibold text-foreground">{importResult.total}</span> records</span>
+              <span><span className="text-green-400 font-semibold">+{importResult.added}</span> new users added</span>
+              <span><span className="text-blue-400 font-semibold">{importResult.updated}</span> existing users updated</span>
+              {importResult.skipped > 0 && (
+                <span><span className="text-muted-foreground font-semibold">{importResult.skipped}</span> skipped (invalid)</span>
+              )}
+            </div>
+          </div>
+        )}
+        {importError && (
+          <div className="mb-5 flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-400">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {importError}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">

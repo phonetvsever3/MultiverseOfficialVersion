@@ -13,6 +13,54 @@ const SessionStore = MemoryStore(session);
 const app = express();
 const httpServer = createServer(app);
 
+// ── Security: block sourcemap files from being served externally ──────────────
+// In production, source maps are disabled anyway. In dev, block .map requests
+// so even if a map file were generated, it won't be downloadable.
+app.use((req, res, next) => {
+  if (req.path.endsWith(".map")) {
+    return res.status(404).end();
+  }
+  next();
+});
+
+// ── Security: HTTP headers ────────────────────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+// ── Security: login rate limiter (max 10 attempts per 15 min per IP) ─────────
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_MAX = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+function loginRateLimiter(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.method !== "POST" || req.path !== "/api/admin/login") return next();
+  const ip = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= LOGIN_MAX) {
+      const wait = Math.ceil((entry.resetAt - now) / 60000);
+      return res.status(429).json({ message: `Too many login attempts. Try again in ${wait} minute(s).` });
+    }
+    entry.count++;
+  } else {
+    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  }
+  next();
+}
+// Clean up stale entries every 30 min
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, e] of loginAttempts.entries()) {
+    if (now >= e.resetAt) loginAttempts.delete(ip);
+  }
+}, 30 * 60 * 1000);
+
 // Prevent unhandled promise rejections from crashing the process
 process.on("unhandledRejection", (reason) => {
   console.error("[unhandledRejection]", reason);
@@ -20,6 +68,9 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
 });
+
+// Apply login rate limiter early (before body parsing so it's fast)
+app.use(loginRateLimiter);
 
 // Serve uploaded files statically
 const uploadsDir = path.resolve("public/uploads");
