@@ -825,9 +825,21 @@ export async function registerRoutes(
     }
     _prevCpu = cur;
     const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
     const mem = process.memoryUsage();
+
+    // On Linux, use /proc/meminfo for accurate available RAM.
+    // os.freemem() only counts truly-free pages; Linux fills spare RAM with
+    // page cache so freemem() always looks artificially low.
+    // MemAvailable = free + reclaimable cache — what can actually be used.
+    let availableMem = os.freemem();
+    try {
+      if (os.platform() === "linux") {
+        const meminfo = await fs.promises.readFile("/proc/meminfo", "utf8");
+        const match = meminfo.match(/^MemAvailable:\s+(\d+)\s+kB/m);
+        if (match) availableMem = parseInt(match[1]) * 1024;
+      }
+    } catch { /* fallback to os.freemem() */ }
+    const usedMem = totalMem - availableMem;
 
     const now = Date.now();
     _reqWindow = _reqWindow.filter(t => now - t < 60000);
