@@ -20,6 +20,19 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/[hash].js",
+        chunkFileNames: "assets/[hash].js",
+        assetFileNames: "assets/[hash][extname]",
+      },
+    },
+  },
+  css: {
+    devSourcemap: false,
+  },
+  esbuild: {
+    sourcemap: false,
   },
   server: {
     fs: {

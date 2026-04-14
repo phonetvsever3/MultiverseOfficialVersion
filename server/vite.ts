@@ -27,6 +27,16 @@ export async function setupVite(server: Server, app: Express) {
     },
     server: serverOptions,
     appType: "custom",
+    build: {
+      ...viteConfig.build,
+      sourcemap: false,
+    },
+    css: {
+      devSourcemap: false,
+    },
+    esbuild: {
+      sourcemap: false,
+    },
   });
 
   app.use(vite.middlewares);

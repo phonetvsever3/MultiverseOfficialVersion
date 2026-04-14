@@ -2322,30 +2322,20 @@ export async function registerRoutes(
       const html = await response.text();
       const videos: any[] = [];
 
-      // Each video block starts with a unique data-eid attribute
       const rawBlocks = html.split(/<div\s[^>]*data-eid="/);
 
       for (const block of rawBlocks.slice(1, 22)) {
-        // ID from the start of the block
         const eid = block.match(/^([a-z0-9]+)"/)?.[1];
         if (!eid) continue;
 
-        // URL path
         const hrefMatch = block.match(/href="(\/video-[a-z0-9]+\/[^"]+)"/);
         if (!hrefMatch) continue;
         const urlPath = hrefMatch[1];
 
-        // Title from title attribute
         const title = block.match(/title="([^"]+)"/)?.[1]?.trim() || "Untitled";
-
-        // Thumbnail — lazy loaded as data-src
         const thumb = block.match(/data-src="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp|gif)[^"]*)"/i)?.[1] || "";
-
-        // Duration — text like "12min" or "1h12min"
         const durMatch = block.match(/>\s*((?:\d+h)?\d+min)\s*</);
         const duration = durMatch?.[1]?.trim() || "";
-
-        // Views — number before the eye icon span
         const viewsMatch = block.match(/([\d,.]+[kK]?)\s*<span[^>]*icf-eye/);
         const viewsRaw = viewsMatch?.[1]?.replace(/,/g, "") || "";
         const views = viewsRaw
@@ -2353,8 +2343,6 @@ export async function registerRoutes(
             ? Math.round(parseFloat(viewsRaw) * 1000)
             : parseInt(viewsRaw)
           : undefined;
-
-        // Quality badge
         const quality = block.match(/video-hd[^>]*>[^0-9]*(\d+p)/)?.[1] || "";
 
         videos.push({
@@ -2378,7 +2366,6 @@ export async function registerRoutes(
   app.get("/api/adult/video/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      // Prefer the full URL passed from the frontend (more reliable)
       const urlParam = req.query.url as string;
       const url = urlParam && urlParam.startsWith("https://www.xnxx.com/")
         ? urlParam
@@ -2389,7 +2376,6 @@ export async function registerRoutes(
 
       const html = await response.text();
 
-      // Extract from html5player.setXxx('value') pattern
       const extract = (key: string): string | null => {
         const patterns = [
           new RegExp(`html5player\\.${key}\\('([^']+)'\\)`),
@@ -2416,12 +2402,10 @@ export async function registerRoutes(
       const thumb    = extract("setThumbUrl169") || extract("setThumbUrl");
       const uploader = extract("setUploaderName");
 
-      // Fallback scrape for m3u8 / mp4 paths
       const fallbackHls  = hls  || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/)?.[1] || null;
       const fallbackHigh = high || html.match(/["'](https?:\/\/[^"']+\/hd\/[^"']+\.mp4[^"']*)/)?.[1] || null;
       const fallbackLow  = low  || html.match(/["'](https?:\/\/[^"']+\/lo\/[^"']+\.mp4[^"']*)/)?.[1] || null;
 
-      // Build deduplicated source list — highest quality first
       const seen = new Set<string>();
       const sources: { label: string; url: string; type: string }[] = [];
       const addSrc = (label: string, url: string | null, type: "mp4" | "hls") => {
@@ -2430,9 +2414,7 @@ export async function registerRoutes(
         sources.push({ label, url, type });
       };
 
-      // HLS adaptive stream first (best for mobile)
       addSrc("Auto (HLS)", fallbackHls, "hls");
-      // Specific resolutions high → low
       addSrc("1080p", p1080, "mp4");
       addSrc("720p",  p720,  "mp4");
       addSrc("480p",  p480,  "mp4");
