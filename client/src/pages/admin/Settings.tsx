@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSettingsSchema, type Settings } from "@shared/schema";
-import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap, Database, Video } from "lucide-react";
+import { Loader2, Bot, Key, User, Send, Hash, Film, Upload, Trash2, RefreshCw, MessageCircle, Plus, X, Zap, Database, Video, Link2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -418,6 +418,7 @@ export default function AdminSettings() {
       fsbHashLength: settings?.fsbHashLength ?? 6,
       apiKey: settings?.apiKey || "",
       tiktokAdminChatId: settings?.tiktokAdminChatId || "",
+      smartLinkUrl: settings?.smartLinkUrl || "",
     }
   });
 
@@ -439,6 +440,7 @@ export default function AdminSettings() {
         fsbHashLength: settings.fsbHashLength ?? 6,
         apiKey: settings.apiKey || "",
         tiktokAdminChatId: settings.tiktokAdminChatId || "",
+        smartLinkUrl: settings.smartLinkUrl || "",
       });
       setPackages(settings.supportPackages || []);
     }
@@ -903,6 +905,36 @@ export default function AdminSettings() {
                       </FormItem>
                     )}
                   />
+                </CardContent>
+              </Card>
+
+              <Card className="hover-elevate border-yellow-500/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Link2 className="h-5 w-5 text-yellow-400" />
+                    Landing Page Smart Link
+                  </CardTitle>
+                  <CardDescription>
+                    The URL users are redirected to from the landing page (<code className="text-xs bg-muted px-1 py-0.5 rounded">/landing.html</code>). Paste your Smart Link here and both the Watch Now and Download Now buttons will redirect to it.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="smartLinkUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Smart Link URL</FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value || ""} placeholder="https://your-smart-link.com/..." className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    After saving, visit <span className="font-mono text-primary">/landing.html</span> to preview the landing page.
+                  </p>
                 </CardContent>
               </Card>
 

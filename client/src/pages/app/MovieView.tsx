@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMovie } from "@/hooks/use-movies";
 import { useServeAd } from "@/hooks/use-ads";
@@ -116,6 +116,57 @@ export default function MovieView() {
   });
 
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 60000 });
+  const { data: smartLinkData } = useQuery<{ url: string }>({ queryKey: ["/api/public/smart-link"], staleTime: 60000 });
+  const smartLinkUrl = smartLinkData?.url || "";
+
+  const [showSmartLink, setShowSmartLink] = useState(false);
+  const [slCountdown, setSlCountdown] = useState(5);
+  const slTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const slRedirectedRef = useRef(false);
+
+  const slFallbackRef = useRef<(() => void) | null>(null);
+
+  const startSmartLink = useCallback((fallback?: () => void) => {
+    slFallbackRef.current = fallback || null;
+    setSlCountdown(5);
+    slRedirectedRef.current = false;
+    setShowSmartLink(true);
+    if (slTimerRef.current) clearInterval(slTimerRef.current);
+    slTimerRef.current = setInterval(() => {
+      setSlCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(slTimerRef.current!);
+          if (!slRedirectedRef.current) {
+            slRedirectedRef.current = true;
+            if (smartLinkUrl) {
+              window.location.href = smartLinkUrl;
+            } else {
+              setShowSmartLink(false);
+              slFallbackRef.current?.();
+            }
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [smartLinkUrl]);
+
+  const doSmartLinkRedirect = useCallback(() => {
+    if (slRedirectedRef.current) return;
+    slRedirectedRef.current = true;
+    if (slTimerRef.current) clearInterval(slTimerRef.current);
+    if (smartLinkUrl) {
+      window.location.href = smartLinkUrl;
+    } else {
+      setShowSmartLink(false);
+      slFallbackRef.current?.();
+    }
+  }, [smartLinkUrl]);
+
+  useEffect(() => {
+    return () => { if (slTimerRef.current) clearInterval(slTimerRef.current); };
+  }, []);
 
   useEffect(() => {
     if (tg) {
@@ -346,13 +397,13 @@ export default function MovieView() {
                <Button
                  size="lg"
                  className="w-full h-20 text-xl font-black bg-green-500 hover:bg-green-600 text-white rounded-[2rem] shadow-[0_20px_60px_rgba(34,197,94,0.4)] flex items-center justify-center gap-4 border-b-8 border-green-950 active:border-b-0 active:translate-y-2 transition-all"
-                 onClick={() => setLocation(selectedEpisode ? `/app/stream/episode/${selectedEpisode.id}` : `/app/stream/movie/${movieId}`)}
+                 onClick={() => startSmartLink(() => setLocation(selectedEpisode ? `/app/stream/episode/${selectedEpisode.id}` : `/app/stream/movie/${movieId}`))}
                  data-testid="button-watch-now"
                >
                  <Play className="w-7 h-7 fill-white" /> Watch Now
                </Button>
                <button
-                 onClick={() => mainButtonHandlerRef.current()}
+                 onClick={() => startSmartLink(() => mainButtonHandlerRef.current())}
                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:bg-white/10 active:scale-95 transition-all"
                  data-testid="button-get-on-bot"
                >
@@ -630,6 +681,106 @@ export default function MovieView() {
           ad={fullscreenAd}
           onClose={() => setShowFullscreenAd(false)}
         />
+      )}
+
+      {/* Smart Link Overlay — AdOverlay style */}
+      {showSmartLink && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          {/* Background glows */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 blur-[120px] rounded-full animate-pulse" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: "700ms" }} />
+          </div>
+
+          <div className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col">
+
+            {/* Header */}
+            <div className="p-5 flex items-center justify-between border-b border-white/5 bg-white/5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white leading-tight">Premium Content</h3>
+                  <p className="text-[10px] text-white/40 uppercase tracking-tighter">Sponsored Support</p>
+                </div>
+              </div>
+              {slCountdown > 0 ? (
+                <div className="bg-white/5 border border-white/10 px-4 py-2 rounded-2xl text-[11px] font-bold text-white/80 flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-primary" />
+                  Wait {slCountdown}s
+                </div>
+              ) : (
+                <button
+                  onClick={doSmartLinkRedirect}
+                  className="rounded-2xl h-10 px-5 text-xs font-bold bg-green-500 hover:bg-green-600 text-white border-none shadow-lg"
+                  data-testid="button-skip-ad"
+                >
+                  Skip Ad →
+                </button>
+              )}
+            </div>
+
+            {/* Ad / Movie Poster area */}
+            <div className="relative flex-1 min-h-[260px] bg-black overflow-hidden flex items-center justify-center">
+              {movie?.posterPath ? (
+                <img
+                  src={movie.posterPath.startsWith("http") ? movie.posterPath : `https://image.tmdb.org/t/p/w500${movie.posterPath}`}
+                  alt={movie.title}
+                  className="w-full h-full object-cover opacity-60"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-purple-900/20">
+                  <Film className="w-20 h-20 text-white/10" />
+                </div>
+              )}
+              {/* Overlay gradient */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+              {/* Movie title badge */}
+              <div className="absolute bottom-4 left-4 right-4">
+                <p className="text-white font-bold text-lg leading-tight drop-shadow-lg line-clamp-2">{movie?.title}</p>
+                {movie?.releaseDate && (
+                  <p className="text-white/60 text-xs mt-0.5">{movie.releaseDate.slice(0, 4)}</p>
+                )}
+              </div>
+              {/* Progress bar on top */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-white/10">
+                <div
+                  className="h-full bg-primary transition-all duration-1000 linear"
+                  style={{ width: `${((5 - slCountdown) / 5) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 bg-[#181818] border-t border-white/5">
+              <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                <div className="text-center sm:text-left">
+                  <h4 className="font-bold text-white text-base">Your link is generating</h4>
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Verified by CineBot Security</p>
+                </div>
+                <button
+                  onClick={doSmartLinkRedirect}
+                  disabled={slCountdown > 0}
+                  className={cn(
+                    "w-full sm:w-auto px-8 h-13 py-4 rounded-2xl font-bold transition-all duration-500 text-sm flex items-center justify-center gap-2",
+                    slCountdown === 0
+                      ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)]"
+                      : "bg-white/5 text-white/30 border border-white/5 cursor-not-allowed"
+                  )}
+                  data-testid="button-unlock-movie"
+                >
+                  {slCountdown > 0 ? (
+                    <>Ready in {slCountdown}s <Zap className="w-4 h-4 animate-pulse" /></>
+                  ) : (
+                    <>Unlock Movie Now <Download className="w-4 h-4" /></>
+                  )}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
       )}
 
     </div>

@@ -145,6 +145,7 @@ export const settings = pgTable("settings", {
   tiktokAdminChatId: text("tiktok_admin_chat_id"),
   telegramBackupChannelId: text("telegram_backup_channel_id"),
   telegramAutoDbBackupEnabled: boolean("telegram_auto_db_backup_enabled").default(false),
+  smartLinkUrl: text("smart_link_url"),
 });
 
 // Mascot Settings

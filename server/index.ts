@@ -82,6 +82,11 @@ const lottieDir = path.resolve("public/lottie");
 if (!fs.existsSync(lottieDir)) fs.mkdirSync(lottieDir, { recursive: true });
 app.use("/lottie", express.static(lottieDir));
 
+// Serve landing page directly (before Vite catch-all)
+app.get("/landing.html", (_req, res) => {
+  res.sendFile(path.resolve("public/landing.html"));
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

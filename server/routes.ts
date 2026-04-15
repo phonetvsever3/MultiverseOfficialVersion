@@ -3290,5 +3290,10 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/public/smart-link", async (_req, res) => {
+    const s = await storage.getSettings();
+    res.json({ url: s?.smartLinkUrl || "" });
+  });
+
   return httpServer;
 }
