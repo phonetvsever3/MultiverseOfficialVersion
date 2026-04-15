@@ -126,6 +126,24 @@ export default function MovieView() {
 
   const slFallbackRef = useRef<(() => void) | null>(null);
 
+  const openSmartLinkUrl = useCallback((url: string) => {
+    try {
+      if (tg?.openLink) {
+        tg.openLink(url);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (e) {
+      console.error('[SmartLink] open failed', e);
+    }
+  }, []);
+
   const startSmartLink = useCallback((fallback?: () => void) => {
     slFallbackRef.current = fallback || null;
     setSlCountdown(5);
@@ -136,33 +154,25 @@ export default function MovieView() {
       setSlCountdown(prev => {
         if (prev <= 1) {
           clearInterval(slTimerRef.current!);
-          if (!slRedirectedRef.current) {
-            slRedirectedRef.current = true;
-            if (smartLinkUrl) {
-              window.location.href = smartLinkUrl;
-            } else {
-              setShowSmartLink(false);
-              slFallbackRef.current?.();
-            }
-          }
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-  }, [smartLinkUrl]);
+  }, []);
 
   const doSmartLinkRedirect = useCallback(() => {
     if (slRedirectedRef.current) return;
     slRedirectedRef.current = true;
     if (slTimerRef.current) clearInterval(slTimerRef.current);
     if (smartLinkUrl) {
-      window.location.href = smartLinkUrl;
-    } else {
-      setShowSmartLink(false);
-      slFallbackRef.current?.();
+      openSmartLinkUrl(smartLinkUrl);
     }
-  }, [smartLinkUrl]);
+    setShowSmartLink(false);
+    setTimeout(() => {
+      slFallbackRef.current?.();
+    }, 300);
+  }, [smartLinkUrl, openSmartLinkUrl]);
 
   useEffect(() => {
     return () => { if (slTimerRef.current) clearInterval(slTimerRef.current); };
@@ -754,29 +764,36 @@ export default function MovieView() {
 
             {/* Footer */}
             <div className="p-6 bg-[#181818] border-t border-white/5">
-              <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                <div className="text-center sm:text-left">
-                  <h4 className="font-bold text-white text-base">Your link is generating</h4>
-                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Verified by CineBot Security</p>
+              {/* Watch Ad to Support banner */}
+              <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20">
+                <div className="w-9 h-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-primary" />
                 </div>
-                <button
-                  onClick={doSmartLinkRedirect}
-                  disabled={slCountdown > 0}
-                  className={cn(
-                    "w-full sm:w-auto px-8 h-13 py-4 rounded-2xl font-bold transition-all duration-500 text-sm flex items-center justify-center gap-2",
-                    slCountdown === 0
-                      ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)]"
-                      : "bg-white/5 text-white/30 border border-white/5 cursor-not-allowed"
-                  )}
-                  data-testid="button-unlock-movie"
-                >
-                  {slCountdown > 0 ? (
-                    <>Ready in {slCountdown}s <Zap className="w-4 h-4 animate-pulse" /></>
-                  ) : (
-                    <>Unlock Movie Now <Download className="w-4 h-4" /></>
-                  )}
-                </button>
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">Watch Ad to Support</p>
+                  <p className="text-[10px] text-white/40 mt-0.5">Keeps this service free for everyone</p>
+                </div>
+                <div className="ml-auto shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-primary/60" />
+                </div>
               </div>
+              <button
+                onClick={doSmartLinkRedirect}
+                disabled={slCountdown > 0}
+                className={cn(
+                  "w-full py-4 rounded-2xl font-bold transition-all duration-500 text-sm flex items-center justify-center gap-2",
+                  slCountdown === 0
+                    ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)] scale-100"
+                    : "bg-white/5 text-white/20 border border-white/5 cursor-not-allowed scale-[0.98]"
+                )}
+                data-testid="button-unlock-movie"
+              >
+                {slCountdown > 0 ? (
+                  <>Ready in {slCountdown}s <Zap className="w-4 h-4 animate-pulse" /></>
+                ) : (
+                  <>Unlock Movie Now <Download className="w-4 h-4" /></>
+                )}
+              </button>
             </div>
 
           </div>

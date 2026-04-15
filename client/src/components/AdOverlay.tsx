@@ -124,31 +124,37 @@ export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
           </div>
 
           {/* Enhanced Footer */}
-          <div className="p-8 bg-[#181818] border-t border-white/5">
-            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-               <div className="text-center sm:text-left">
-                  <h4 className="font-bold text-white text-lg">Your link is generating</h4>
-                  <p className="text-[11px] text-white/30 uppercase tracking-widest font-medium">Verified by CineBot Security</p>
-               </div>
-               
-               <Button
-                 onClick={onComplete}
-                 disabled={!canSkip}
-                 size="lg"
-                 className={cn(
-                   "w-full sm:w-auto px-10 h-14 rounded-2xl font-bold transition-all duration-500",
-                   canSkip 
-                     ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)] scale-100" 
-                     : "bg-white/5 text-white/20 border border-white/5 scale-95"
-                 )}
-               >
-                 {canSkip ? (
-                   <span className="flex items-center gap-2">Unlock Movie Now <Download className="w-5 h-5" /></span>
-                 ) : (
-                   <span className="flex items-center gap-2">Ready in {timeLeft}s <Timer className="w-4 h-4 animate-spin-slow" /></span>
-                 )}
-               </Button>
+          <div className="p-6 bg-[#181818] border-t border-white/5">
+            {/* Watch Ad to Support banner */}
+            <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20">
+              <div className="w-9 h-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-sm leading-tight">Watch Ad to Support</p>
+                <p className="text-[10px] text-white/40 mt-0.5">Keeps this service free for everyone</p>
+              </div>
+              <div className="ml-auto shrink-0">
+                <ShieldCheck className="w-5 h-5 text-primary/60" />
+              </div>
             </div>
+            <Button
+              onClick={onComplete}
+              disabled={!canSkip}
+              size="lg"
+              className={cn(
+                "w-full rounded-2xl font-bold transition-all duration-500 h-14",
+                canSkip
+                  ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)] scale-100"
+                  : "bg-white/5 text-white/20 border border-white/5 scale-[0.98]"
+              )}
+            >
+              {canSkip ? (
+                <span className="flex items-center gap-2">Unlock Movie Now <Download className="w-5 h-5" /></span>
+              ) : (
+                <span className="flex items-center gap-2">Ready in {timeLeft}s <Timer className="w-4 h-4 animate-pulse" /></span>
+              )}
+            </Button>
           </div>
 
         </div>
