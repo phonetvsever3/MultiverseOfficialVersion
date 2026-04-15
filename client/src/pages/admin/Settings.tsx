@@ -419,6 +419,8 @@ export default function AdminSettings() {
       apiKey: settings?.apiKey || "",
       tiktokAdminChatId: settings?.tiktokAdminChatId || "",
       smartLinkUrl: settings?.smartLinkUrl || "",
+      smartLinkCountdown: settings?.smartLinkCountdown ?? 5,
+      smartLinkInterval: settings?.smartLinkInterval ?? 0,
     }
   });
 
@@ -441,6 +443,8 @@ export default function AdminSettings() {
         apiKey: settings.apiKey || "",
         tiktokAdminChatId: settings.tiktokAdminChatId || "",
         smartLinkUrl: settings.smartLinkUrl || "",
+        smartLinkCountdown: settings.smartLinkCountdown ?? 5,
+        smartLinkInterval: settings.smartLinkInterval ?? 0,
       });
       setPackages(settings.supportPackages || []);
     }
@@ -932,6 +936,51 @@ export default function AdminSettings() {
                       </FormItem>
                     )}
                   />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="smartLinkCountdown"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Ad Countdown (seconds)</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type="number"
+                              min={1}
+                              max={60}
+                              value={field.value ?? 5}
+                              onChange={e => field.onChange(Number(e.target.value))}
+                              data-testid="input-smart-link-countdown"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">How long the ad countdown lasts each time it shows. Default is 5s.</p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="smartLinkInterval"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Next Ad Interval (minutes)</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type="number"
+                              min={0}
+                              value={field.value ?? 0}
+                              onChange={e => field.onChange(Number(e.target.value))}
+                              data-testid="input-smart-link-interval"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">Minutes before the ad shows again to the same user. Set to 0 to always show.</p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     After saving, visit <span className="font-mono text-primary">/landing.html</span> to preview the landing page.
                   </p>

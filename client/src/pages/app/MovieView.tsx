@@ -116,14 +116,18 @@ export default function MovieView() {
   });
 
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 60000 });
-  const { data: smartLinkData } = useQuery<{ url: string }>({ queryKey: ["/api/public/smart-link"], staleTime: 60000 });
+  const { data: smartLinkData } = useQuery<{ url: string; countdown: number; interval: number }>({ queryKey: ["/api/public/smart-link"], staleTime: 60000 });
   const smartLinkUrl = smartLinkData?.url || "";
+  const smartLinkDuration = smartLinkData?.countdown ?? 5;
+  // interval is in minutes; 0 = always show
+  const smartLinkInterval = smartLinkData?.interval ?? 0;
+
+  const SL_LAST_SEEN_KEY = "sl_last_seen";
 
   const [showSmartLink, setShowSmartLink] = useState(false);
-  const [slCountdown, setSlCountdown] = useState(5);
+  const [slCountdown, setSlCountdown] = useState(smartLinkDuration);
   const slTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slRedirectedRef = useRef(false);
-
   const slFallbackRef = useRef<(() => void) | null>(null);
 
   const openSmartLinkUrl = useCallback((url: string) => {
@@ -131,22 +135,55 @@ export default function MovieView() {
       if (tg?.openLink) {
         tg.openLink(url);
       } else {
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const win = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!win) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
       }
     } catch (e) {
       console.error('[SmartLink] open failed', e);
     }
   }, []);
 
+  const doSmartLinkRedirect = useCallback(() => {
+    if (slRedirectedRef.current) return;
+    slRedirectedRef.current = true;
+    if (slTimerRef.current) clearInterval(slTimerRef.current);
+    if (smartLinkUrl) {
+      openSmartLinkUrl(smartLinkUrl);
+    }
+    // Record when user last saw the ad
+    try { localStorage.setItem(SL_LAST_SEEN_KEY, String(Date.now())); } catch {}
+    setShowSmartLink(false);
+    setTimeout(() => {
+      slFallbackRef.current?.();
+    }, 300);
+  }, [smartLinkUrl, openSmartLinkUrl]);
+
   const startSmartLink = useCallback((fallback?: () => void) => {
+    // Check interval: if enough time hasn't passed, skip the ad
+    if (smartLinkInterval > 0) {
+      try {
+        const lastSeen = Number(localStorage.getItem(SL_LAST_SEEN_KEY) || "0");
+        const elapsed = Date.now() - lastSeen;
+        const intervalMs = smartLinkInterval * 60 * 1000;
+        if (lastSeen > 0 && elapsed < intervalMs) {
+          // Not time yet — skip ad and go directly to content
+          fallback?.();
+          return;
+        }
+      } catch {}
+    }
+
     slFallbackRef.current = fallback || null;
-    setSlCountdown(5);
+    const duration = smartLinkDuration > 0 ? smartLinkDuration : 5;
+    setSlCountdown(duration);
     slRedirectedRef.current = false;
     setShowSmartLink(true);
     if (slTimerRef.current) clearInterval(slTimerRef.current);
@@ -159,24 +196,18 @@ export default function MovieView() {
         return prev - 1;
       });
     }, 1000);
-  }, []);
-
-  const doSmartLinkRedirect = useCallback(() => {
-    if (slRedirectedRef.current) return;
-    slRedirectedRef.current = true;
-    if (slTimerRef.current) clearInterval(slTimerRef.current);
-    if (smartLinkUrl) {
-      openSmartLinkUrl(smartLinkUrl);
-    }
-    setShowSmartLink(false);
-    setTimeout(() => {
-      slFallbackRef.current?.();
-    }, 300);
-  }, [smartLinkUrl, openSmartLinkUrl]);
+  }, [smartLinkDuration, smartLinkInterval]);
 
   useEffect(() => {
     return () => { if (slTimerRef.current) clearInterval(slTimerRef.current); };
   }, []);
+
+  // Auto-redirect when countdown reaches 0
+  useEffect(() => {
+    if (showSmartLink && slCountdown === 0) {
+      doSmartLinkRedirect();
+    }
+  }, [slCountdown, showSmartLink, doSmartLinkRedirect]);
 
   useEffect(() => {
     if (tg) {
@@ -757,7 +788,7 @@ export default function MovieView() {
               <div className="absolute top-0 left-0 right-0 h-1 bg-white/10">
                 <div
                   className="h-full bg-primary transition-all duration-1000 linear"
-                  style={{ width: `${((5 - slCountdown) / 5) * 100}%` }}
+                  style={{ width: `${((smartLinkDuration - slCountdown) / smartLinkDuration) * 100}%` }}
                 />
               </div>
             </div>

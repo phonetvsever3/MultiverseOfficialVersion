@@ -146,6 +146,8 @@ export const settings = pgTable("settings", {
   telegramBackupChannelId: text("telegram_backup_channel_id"),
   telegramAutoDbBackupEnabled: boolean("telegram_auto_db_backup_enabled").default(false),
   smartLinkUrl: text("smart_link_url"),
+  smartLinkCountdown: integer("smart_link_countdown").default(5),
+  smartLinkInterval: integer("smart_link_interval").default(0),
 });
 
 // Mascot Settings
