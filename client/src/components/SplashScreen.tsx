@@ -46,13 +46,13 @@ export default function SplashScreen({ onDone }: Props) {
 
     video.addEventListener("ended", handleEnd);
 
-    // Fallback: show slide after 12s if video never ends
+    // Fallback: show slide after 3s if video never ends (e.g. autoplay blocked on mobile)
     const fallback = setTimeout(() => {
       if (!hasLoopedRef.current) {
         hasLoopedRef.current = true;
         setVideoEnded(true);
       }
-    }, 12000);
+    }, 3000);
 
     video.play().catch(() => {
       clearTimeout(fallback);

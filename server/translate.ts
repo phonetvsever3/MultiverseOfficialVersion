@@ -1,4 +1,5 @@
 const cache = new Map<string, string>();
+const CACHE_MAX = 300;
 
 export async function translateToMyanmar(text: string): Promise<string> {
   if (!text) return "";
@@ -15,6 +16,11 @@ export async function translateToMyanmar(text: string): Promise<string> {
       ?.map((chunk: any[]) => chunk[0])
       .filter(Boolean)
       .join("") || text;
+    // Evict oldest entry if at capacity
+    if (cache.size >= CACHE_MAX) {
+      const [oldest] = cache.keys();
+      cache.delete(oldest);
+    }
     cache.set(text, translated);
     return translated;
   } catch {

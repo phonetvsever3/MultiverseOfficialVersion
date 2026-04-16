@@ -3,6 +3,22 @@ import { storage } from './storage';
 import { translateToMyanmar } from './translate';
 
 let botInstance: TelegramBot | null = null;
+let botStarting = false;
+
+// Deduplication: track recently processed message keys to prevent double-reply
+// Key = `${chatId}:${messageId}`
+const processedMsgKeys = new Set<string>();
+const DEDUP_MAX = 500;
+function isDuplicate(chatId: number, messageId: number): boolean {
+  const key = `${chatId}:${messageId}`;
+  if (processedMsgKeys.has(key)) return true;
+  processedMsgKeys.add(key);
+  if (processedMsgKeys.size > DEDUP_MAX) {
+    const [oldest] = processedMsgKeys;
+    processedMsgKeys.delete(oldest);
+  }
+  return false;
+}
 
 function buildKeyboard(webAppUrl: string) {
   return {
@@ -38,28 +54,36 @@ export async function startBot() {
     return;
   }
 
-  // Stop any previous instance cleanly
-  if (botInstance) {
-    try {
-      await botInstance.stopPolling({ cancel: true });
-      botInstance.removeAllListeners();
-      botInstance = null;
-    } catch (e) {
-      console.error("[Bot] Error stopping previous instance:", e);
-    }
+  // Guard against concurrent startBot() calls (e.g. startup + settings save at the same time)
+  if (botStarting) {
+    console.log("[Bot] Already starting — skipping duplicate call.");
+    return;
   }
+  botStarting = true;
 
-  // Delete any existing webhook first — this is the #1 cause of polling not working
   try {
-    const tempBot = new TelegramBot(token);
-    await tempBot.deleteWebHook();
-    console.log("[Bot] Webhook cleared.");
-  } catch (e: any) {
-    console.log("[Bot] Could not clear webhook:", e?.message);
-  }
+    // Stop any previous instance cleanly
+    if (botInstance) {
+      try {
+        await botInstance.stopPolling({ cancel: true });
+        botInstance.removeAllListeners();
+        botInstance = null;
+      } catch (e) {
+        console.error("[Bot] Error stopping previous instance:", e);
+      }
+    }
 
-  // Small delay to let Telegram process the webhook deletion
-  await new Promise(r => setTimeout(r, 1500));
+    // Delete any existing webhook first — this is the #1 cause of polling not working
+    try {
+      const tempBot = new TelegramBot(token, { polling: false });
+      await tempBot.deleteWebHook();
+      console.log("[Bot] Webhook cleared.");
+    } catch (e: any) {
+      console.log("[Bot] Could not clear webhook:", e?.message);
+    }
+
+    // Small delay to let Telegram process the webhook deletion
+    await new Promise(r => setTimeout(r, 1500));
 
   botInstance = new TelegramBot(token, {
     polling: {
@@ -330,6 +354,7 @@ export async function startBot() {
   // ─── /start ────────────────────────────────────────────────────────────────
   botInstance.onText(/\/start(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
+    if (isDuplicate(chatId, msg.message_id)) return;
     await trackUser(msg.from);
 
     const startParam = match?.[1];
@@ -460,8 +485,11 @@ export async function startBot() {
     const chatId = msg.chat.id;
     const text = (msg.text || "").trim();
 
-    // Skip commands (handled above)
+    // Skip commands (handled above by onText)
     if (text.startsWith('/')) return;
+
+    // Deduplication guard
+    if (isDuplicate(chatId, msg.message_id)) return;
 
     await trackUser(msg.from);
 
@@ -593,12 +621,29 @@ export async function startBot() {
       }
     }
   });
+
+  } finally {
+    botStarting = false;
+  }
 }
 
 export const bot = botInstance;
 
 export function getBotInstance(): TelegramBot | null {
   return botInstance;
+}
+
+export async function stopBot(): Promise<void> {
+  if (botInstance) {
+    try {
+      await botInstance.stopPolling({ cancel: true });
+      botInstance.removeAllListeners();
+      botInstance = null;
+      console.log("[Bot] Stopped cleanly.");
+    } catch (e) {
+      console.error("[Bot] Error stopping:", e);
+    }
+  }
 }
 
 export async function broadcastMovieNotification(movie: any): Promise<{ sent: number; failed: number }> {

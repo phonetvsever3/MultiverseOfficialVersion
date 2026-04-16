@@ -25,6 +25,13 @@ export default defineConfig({
         entryFileNames: "assets/[hash].js",
         chunkFileNames: "assets/[hash].js",
         assetFileNames: "assets/[hash][extname]",
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-motion": ["framer-motion"],
+          "vendor-videojs": ["video.js"],
+          "vendor-query": ["@tanstack/react-query"],
+          "vendor-lottie": ["@lottiefiles/dotlottie-react"],
+        },
       },
     },
   },

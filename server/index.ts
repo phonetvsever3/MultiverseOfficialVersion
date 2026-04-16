@@ -1,6 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
+import { stopBot } from "./bot";
 import { createServer } from "http";
 import path from "path";
 import fs from "fs";
@@ -12,6 +14,17 @@ const SessionStore = MemoryStore(session);
 
 const app = express();
 const httpServer = createServer(app);
+
+// ── Compression — gzip all responses except video streams ─────────────────────
+app.use(compression({
+  filter: (req, res) => {
+    // Don't compress video/audio streams — they are already compressed
+    const ct = res.getHeader("content-type") as string | undefined;
+    if (ct && (ct.includes("video/") || ct.includes("audio/"))) return false;
+    return compression.filter(req, res);
+  },
+  level: 6,
+}));
 
 // ── Security: block sourcemap files from being served externally ──────────────
 // In production, source maps are disabled anyway. In dev, block .map requests
@@ -191,9 +204,10 @@ app.use((req, res, next) => {
     },
   );
 
-  // Graceful shutdown — ensures the port is released before the process exits
-  // so that a restarted instance doesn't hit EADDRINUSE
-  const shutdown = () => {
+  // Graceful shutdown — stop bot polling first so Telegram releases the connection
+  // immediately, preventing a 409 conflict when the next instance starts.
+  const shutdown = async () => {
+    await stopBot().catch(() => {});
     httpServer.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 5000).unref();
   };

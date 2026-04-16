@@ -21,6 +21,10 @@ interface ServerStats {
   heapTotal: number;
   heapSizeLimit: number;
   rss: number;
+  rssPercent: number;
+  sysRamUsed: number;
+  sysRamTotal: number;
+  sysRamPercent: number;
   uptime: number;
   processUptime: number;
   platform: string;
@@ -184,7 +188,7 @@ export default function ServerStatsPage() {
       const next = [...prev, {
         time: now,
         cpu: stats.cpu,
-        ram: stats.ramPercent,
+        ram: stats.rssPercent ?? 0,
         latency: stats.avgLatency,
         reqPerMin: stats.reqPerMin,
       }];
@@ -204,7 +208,7 @@ export default function ServerStatsPage() {
   });
 
   const cpuColor = (stats?.cpu ?? 0) > 80 ? "#ef4444" : (stats?.cpu ?? 0) > 50 ? "#f97316" : "#22c55e";
-  const ramColor = (stats?.ramPercent ?? 0) > 80 ? "#ef4444" : (stats?.ramPercent ?? 0) > 60 ? "#f97316" : "#3b82f6";
+  const ramColor = (stats?.rssPercent ?? 0) > 80 ? "#ef4444" : (stats?.rssPercent ?? 0) > 60 ? "#f97316" : "#3b82f6";
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -290,7 +294,7 @@ export default function ServerStatsPage() {
                 </div>
                 <div className="flex items-center gap-2 ml-auto">
                   <span className="font-semibold">System up:</span>
-                  <span className="text-foreground font-bold">{formatUptime(stats.uptime)}</span>
+                  <span className="text-foreground font-bold">{formatUptime(stats.processUptime)}</span>
                 </div>
               </div>
             )}
@@ -307,12 +311,12 @@ export default function ServerStatsPage() {
               />
               <StatGauge
                 label="RAM Usage"
-                value={`${stats?.ramUsed ?? 0}`}
-                unit={`/ ${stats?.ramTotal ?? 0} MB`}
-                percent={stats?.ramPercent ?? 0}
+                value={`${stats?.rss ?? 0}`}
+                unit={`/ ${stats?.heapSizeLimit ?? 0} MB`}
+                percent={stats?.rssPercent ?? 0}
                 color={ramColor}
                 icon={<MemoryStick className="w-4 h-4" />}
-                sub={`${stats?.ramPercent ?? 0}% used`}
+                sub={`${stats?.rssPercent ?? 0}% of limit`}
               />
               <StatGauge
                 label="Heap Usage"
@@ -321,7 +325,7 @@ export default function ServerStatsPage() {
                 percent={stats?.heapSizeLimit ? Math.round((stats.heapUsed / stats.heapSizeLimit) * 100) : 0}
                 color="#a855f7"
                 icon={<Gauge className="w-4 h-4" />}
-                sub={`RSS: ${stats?.rss ?? 0} MB`}
+                sub={`Host RAM: ${stats?.sysRamPercent ?? 0}% of ${Math.round((stats?.sysRamTotal ?? 0) / 1024)}GB`}
               />
               <StatGauge
                 label="Avg Latency"
@@ -412,10 +416,10 @@ export default function ServerStatsPage() {
                     <MemoryStick className="w-4 h-4 text-blue-500" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold">RAM Usage</h3>
-                    <p className="text-[11px] text-muted-foreground">Live history</p>
+                    <h3 className="text-sm font-bold">Process RAM (RSS)</h3>
+                    <p className="text-[11px] text-muted-foreground">App memory · host: {stats?.sysRamPercent ?? 0}% used</p>
                   </div>
-                  <span className="ml-auto text-2xl font-black" style={{ color: ramColor }}>{stats?.ramPercent ?? 0}%</span>
+                  <span className="ml-auto text-2xl font-black" style={{ color: ramColor }}>{stats?.rssPercent ?? 0}%</span>
                 </div>
                 <div className="h-[180px]">
                   <ResponsiveContainer width="100%" height="100%">
