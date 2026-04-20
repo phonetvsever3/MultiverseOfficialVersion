@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music, Ghost, Rocket, TrendingUp, CalendarDays } from "lucide-react";
+import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music, Ghost, Rocket, TrendingUp, CalendarDays, Lock } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
@@ -29,6 +29,7 @@ interface HomeSections {
   scifi: Movie[];
   todayTrending: Movie[];
   weeklyTrending: Movie[];
+  adult: Movie[];
 }
 
 function getPoster(path: string | null | undefined, size = "w342") {
@@ -562,6 +563,21 @@ export default function Home() {
                 items={sections?.bollywood || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?lang=hi&sort=rating&title=Bollywood')}
+              />
+            )}
+
+            {/* 18+ Adult */}
+            {(sections?.adult?.length ?? 0) > 0 && (
+              <PremiumSection
+                title="18+ Adult"
+                icon={<Lock className="w-5 h-5 text-red-400" />}
+                badge="Adults only · 18+ content"
+                accentFrom="from-red-950/70"
+                accentTo="to-rose-950/30"
+                borderColor="border-red-800/40"
+                items={sections?.adult || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?adult=1&title=18%2B+Adult')}
               />
             )}
 

@@ -73,8 +73,17 @@ export default function Stream() {
     );
   }
 
+  // Skip preflight error if we have external URL sources (m3u8 / MP4) to fall back on
+  const hasExternalSourcesEarly = ((): boolean => {
+    const pUrl = type === "movie" ? (movie as any)?.streamUrl : (episode as any)?.streamUrl;
+    if (pUrl && /^https?:\/\//i.test(pUrl)) return true;
+    const qUrls = type === "movie" ? (movie as any)?.qualityUrls : null;
+    if (Array.isArray(qUrls) && qUrls.some((s: any) => s?.url)) return true;
+    return false;
+  })();
+
   // Show a clear error if the stream endpoint returned an error
-  if (hlsCheck && !hlsCheck.ok) {
+  if (hlsCheck && !hlsCheck.ok && !hasExternalSourcesEarly) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-5 px-6">
         <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center">
@@ -121,6 +130,23 @@ export default function Stream() {
 
   // Build sources: prefer qualityUrls array from movie; always include base stream
   const sources: VideoSource[] = [];
+
+  // Helper: auto-detect video type from URL
+  function detectType(url: string): "mp4" | "hls" {
+    return /\.m3u8(\?|$)/i.test(url) ? "hls" : "mp4";
+  }
+
+  // 1. Primary stream URL (manually set by admin — supports m3u8 / MP4 / HLS)
+  const primaryUrl = type === "movie" ? (movie as any)?.streamUrl : (episode as any)?.streamUrl;
+  if (primaryUrl && /^https?:\/\//i.test(primaryUrl)) {
+    sources.push({
+      label: type === "movie" ? (movie?.quality || "HD") : "HD",
+      url: primaryUrl,
+      type: detectType(primaryUrl),
+    });
+  }
+
+  // 2. qualityUrls array (multi-quality sources)
   const qualityUrlsRaw = type === "movie" ? (movie as any)?.qualityUrls : null;
   if (Array.isArray(qualityUrlsRaw) && qualityUrlsRaw.length > 0) {
     qualityUrlsRaw.forEach((src: { label: string; fileId?: string; url?: string; type?: "mp4" | "hls" }) => {
@@ -129,17 +155,21 @@ export default function Stream() {
         // Telegram File ID mode — stream via /api/stream/telegram/:fileId
         sources.push({ label: src.label, url: `/api/stream/telegram/${src.fileId}`, type: "mp4" });
       } else if (src.url) {
-        // External URL mode
-        sources.push({ label: src.label, url: src.url, type: src.type || "mp4" });
+        // External URL mode — auto-detect hls/mp4 if type not set
+        sources.push({ label: src.label, url: src.url, type: src.type || detectType(src.url) });
       }
     });
   }
-  // Always include the built-in Telegram/HLS stream as a quality option
+
+  // 3. Always include the built-in Telegram/HLS stream as a fallback
   sources.push({
     label: sources.length > 0 ? "Auto" : (type === "movie" ? movie?.quality || "HD" : "HD"),
     url: `/api/stream/${type}/${id}`,
     type: "mp4",
   });
+
+  // If there are external URL sources, don't block playback on preflight failure
+  const hasExternalSources = sources.slice(0, -1).some(s => s.url.startsWith("http"));
 
   const showIntro = introConfig?.hasVideo && !introDone;
 

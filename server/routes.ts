@@ -1597,10 +1597,41 @@ export async function registerRoutes(
   });
 
   // Bulk-fix generic filenames by looking up matching movies/episodes in the library
+  function decodeHyphenLetters(name: string): string | null {
+    // Detect pattern like A-t-t-a-c-k-O-f-T-h-e-M-a-c-h-i-n-e(2025)
+    // Majority of hyphen-separated segments must be single letters
+    const segments = name.split('-');
+    if (segments.length < 4) return null;
+    const singleLetterCount = segments.filter(s => /^[a-zA-Z]$/.test(s)).length;
+    if (singleLetterCount < 3 || singleLetterCount / segments.length < 0.5) return null;
+
+    const SMALL_WORDS = new Set(['of','the','a','an','in','on','at','to','for','and','or','but','nor','so','yet','by','up','as','if','it']);
+
+    // Build decoded string: insert space before uppercase segment (word boundary)
+    let decoded = '';
+    for (const seg of segments) {
+      if (decoded.length > 0 && /^[A-Z]/.test(seg)) decoded += ' ';
+      decoded += seg;
+    }
+
+    // Add space before '(' if not already present
+    decoded = decoded.replace(/([^ ])\(/g, '$1 (');
+
+    // Apply title-case: lowercase small words except the first
+    decoded = decoded.split(' ').map((word, i) => {
+      const lower = word.toLowerCase();
+      if (i > 0 && SMALL_WORDS.has(lower)) return lower;
+      return word;
+    }).join(' ');
+
+    return decoded.trim();
+  }
+
   app.post("/api/synced-files/fix-names", async (_req, res) => {
     try {
       const { normalizeFileName } = await import("./unicode-normalize");
       const GENERIC_NAME = /^(video|file|document|audio|animation|default[_.\s-]?name|default|untitled|no[_.\s-]?name|filename|movie|media|unnamed|File_\d+)(\.mp4|\.mkv|\.avi|\.mov|\.ts)?$/i;
+      const VIDEO_EXT = /\.(mp4|mkv|avi|mov|ts|webm)$/i;
       const { items: allFiles } = await storage.getSyncedFiles({ limit: 10000 });
 
       // Build lookup maps from library
@@ -1629,9 +1660,17 @@ export async function registerRoutes(
             }
           }
         } else {
-          // Normalize Unicode styled chars (bold, italic, etc.) to plain ASCII
-          const normalized = normalizeFileName(file.fileName);
-          if (normalized !== file.fileName) newName = normalized;
+          // Try to decode hyphenated letter format: A-t-t-a-c-k-O-f-T-h-e → Attack of the
+          const decoded = decodeHyphenLetters(file.fileName);
+          if (decoded) {
+            newName = VIDEO_EXT.test(decoded) ? decoded : decoded + '.mp4';
+          } else {
+            // Normalize Unicode styled chars (bold, italic, etc.) to plain ASCII
+            let normalized = normalizeFileName(file.fileName);
+            // Add .mp4 extension if missing
+            if (!VIDEO_EXT.test(normalized)) normalized += '.mp4';
+            if (normalized !== file.fileName) newName = normalized;
+          }
         }
 
         if (newName) {
@@ -1780,7 +1819,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending] = await Promise.all([
+      const [latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending, adult] = await Promise.all([
         storage.getMovies({ limit: 12, offset: 0 }).then(r => r.items),
         storage.getMovies({ type: 'movie', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getMovies({ type: 'series', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
@@ -1796,8 +1835,9 @@ export async function registerRoutes(
         storage.getMovies({ search: 'sci-fi', limit: 12, offset: 0, sort: 'rating' }).then(r => r.items),
         storage.getTrendingByPeriod(1, 12),
         storage.getTrendingByPeriod(7, 12),
+        storage.getMovies({ isAdult: true, limit: 24, offset: 0 }).then(r => r.items),
       ]);
-      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending };
+      const result = { latest, topMovies, topSeries, bestView, bollywood, kdrama, recommended, newMovies, newSeries, action, animation, horror, scifi, todayTrending, weeklyTrending, adult };
       setCache(cacheKey, result, TTL.HOME);
       res.setHeader("Cache-Control", `public, max-age=${TTL.HOME / 1000}`);
       res.json(result);
@@ -2450,9 +2490,10 @@ export async function registerRoutes(
       const sort = (req.query.sort as string) || "rating";
       const lang = (req.query.lang as string) || "";
       const search = (req.query.search as string) || "";
+      const adult = req.query.adult === "1" ? true : undefined;
       const page = Number(req.query.page) || 1;
       const limit = 20;
-      const cacheKey = `browse:${type}:${sort}:${lang}:${search}:p${page}`;
+      const cacheKey = `browse:${type}:${sort}:${lang}:${search}:adult${adult}:p${page}`;
       const hit = getCached(cacheKey);
       if (hit) {
         console.log(`[Cache] CACHE HIT → ${cacheKey}`);
@@ -2460,7 +2501,7 @@ export async function registerRoutes(
         return res.json(hit);
       }
       console.log(`[Cache] FETCH API → ${cacheKey}`);
-      const result = await storage.getMovies({ type, sort, language: lang || undefined, search: search || undefined, limit, offset: (page - 1) * limit });
+      const result = await storage.getMovies({ type, sort, language: lang || undefined, search: search || undefined, limit, offset: (page - 1) * limit, isAdult: adult });
       setCache(cacheKey, result, TTL.BROWSE);
       res.setHeader("Cache-Control", `public, max-age=${TTL.BROWSE / 1000}`);
       res.json(result);

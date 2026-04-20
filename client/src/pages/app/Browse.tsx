@@ -24,6 +24,7 @@ function getParams() {
     search: params.get("search") || "",
     actor: params.get("actor") || "",
     title: params.get("title") || "",
+    adult: params.get("adult") || "",
   };
 }
 
@@ -47,20 +48,21 @@ function getTitle(type: string, sort: string, lang: string, search: string, acto
 
 export default function Browse() {
   const [, setLocation] = useLocation();
-  const { type, sort, lang, search, actor, title } = getParams();
+  const { type, sort, lang, search, actor, title, adult } = getParams();
   const [page, setPage] = useState(1);
   const [allItems, setAllItems] = useState<Movie[]>([]);
 
   const effectiveSearch = actor || search;
 
   const { data, isLoading, isFetching } = useQuery<{ items: Movie[]; total: number }>({
-    queryKey: [`/api/browse`, type, sort, lang, effectiveSearch, page],
+    queryKey: [`/api/browse`, type, sort, lang, effectiveSearch, adult, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (type) params.set("type", type);
       if (sort) params.set("sort", sort);
       if (lang) params.set("lang", lang);
       if (effectiveSearch) params.set("search", effectiveSearch);
+      if (adult) params.set("adult", adult);
       params.set("page", String(page));
       const res = await fetch(`/api/browse?${params}`);
       return res.json();

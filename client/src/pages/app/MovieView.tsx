@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMovie } from "@/hooks/use-movies";
-import { useServeAd } from "@/hooks/use-ads";
 import { Button } from "@/components/ui/button";
 import { Calendar, Star, ShieldCheck, Film, Download, X, Tv, Database, ArrowRight, Sparkles, User, Zap, Play, ChevronLeft, Languages } from "lucide-react";
 import { AdOverlay } from "@/components/AdOverlay";
+import { useServeAd } from "@/hooks/use-ads";
 import { AdRenderer } from "@/components/AdRenderer";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,6 @@ export default function MovieView() {
   const movieId = parseInt(params?.id || "0");
   const { data: movie, isLoading: isMovieLoading } = useMovie(movieId);
   const { data: ad, isLoading: isAdLoading, refetch: refetchAd } = useServeAd();
-  
   const [showAd, setShowAd] = useState(false);
   const [isReadyToWatch, setIsReadyToWatch] = useState(false);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
@@ -257,7 +256,7 @@ export default function MovieView() {
     if (episode) setSelectedEpisode(episode);
     setIsReadyToWatch(false);
     setShowAd(true);
-    refetchAd(); 
+    refetchAd();
   };
 
   const handleAdComplete = () => {
@@ -710,10 +709,11 @@ export default function MovieView() {
       </div>
 
       {showAd && (
-        <AdOverlay 
-          ad={ad} 
-          isLoading={isAdLoading} 
-          onComplete={handleAdComplete} 
+        <AdOverlay
+          ad={ad}
+          isLoading={isAdLoading}
+          onComplete={handleAdComplete}
+          smartLinkUrl={smartLinkUrl}
         />
       )}
 

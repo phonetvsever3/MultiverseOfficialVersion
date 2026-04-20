@@ -32,6 +32,8 @@ export const movies = pgTable("movies", {
   streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
   qualityUrls: jsonb("quality_urls"), // [{label:"1080p",url:"...",type:"mp4"|"hls"}]
   trailerUrl: text("trailer_url"), // Custom trailer URL (YouTube link or direct video)
+  isAdult: boolean("is_adult").default(false),
+  contentRating: text("content_rating"), // e.g. "18+", "21+", "Erotic", "Adult"
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, Timer, Play, Download, Sparkles, ShieldCheck } from "lucide-react";
+import { Timer, Download, Sparkles, ShieldCheck } from "lucide-react";
 import { type Ad } from "@shared/schema";
 import { useRecordImpression } from "@/hooks/use-ads";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,11 @@ interface AdOverlayProps {
   ad: Ad | null | undefined;
   onComplete: () => void;
   isLoading: boolean;
+  smartLinkUrl?: string;
 }
 
-export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
-  const [timeLeft, setTimeLeft] = useState(8); 
+export function AdOverlay({ ad, onComplete, isLoading, smartLinkUrl }: AdOverlayProps) {
+  const [timeLeft, setTimeLeft] = useState(8);
   const [canSkip, setCanSkip] = useState(false);
   const { mutate: recordImpression } = useRecordImpression();
   const hasRecordedImpression = useRef(false);
@@ -24,23 +25,21 @@ export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
       hasRecordedImpression.current = true;
     }
 
-    if (ad) {
-      const timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            setCanSkip(true);
-            clearInterval(timer);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(timer);
-    }
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          setCanSkip(true);
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
   }, [ad, recordImpression]);
 
   if (isLoading) return null;
-  
+
   if (!ad && !isLoading) {
     onComplete();
     return null;
@@ -52,17 +51,16 @@ export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 sm:p-6"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black p-4 sm:p-6"
       >
-        {/* Animated Background Glow */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 blur-[120px] rounded-full animate-pulse" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[120px] rounded-full animate-pulse delay-700" />
         </div>
 
         <div className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col">
-          
-          {/* Enhanced Header */}
+
+          {/* Header */}
           <div className="p-6 flex items-center justify-between border-b border-white/5 bg-white/5">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
@@ -73,59 +71,36 @@ export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
                 <p className="text-[10px] text-white/40 uppercase tracking-tighter">Sponsored Support</p>
               </div>
             </div>
-            
-            <div className="flex items-center gap-2">
-              {!canSkip ? (
-                <div className="bg-white/5 border border-white/10 px-4 py-2 rounded-2xl text-[11px] font-bold text-white/80 flex items-center gap-2">
-                  <Timer className="w-3.5 h-3.5 text-primary" />
-                  Wait {timeLeft}s
-                </div>
-              ) : (
-                <Button 
-                  onClick={onComplete}
-                  className="rounded-2xl h-10 px-6 text-xs font-bold bg-green-500 hover:bg-green-600 text-white border-none shadow-lg shadow-green-500/20 animate-in zoom-in duration-300"
-                >
-                  Skip Ad <ArrowRight className="w-3 h-3 ml-2" />
-                </Button>
-              )}
+            <div className="bg-white/5 border border-white/10 px-4 py-2 rounded-2xl text-[11px] font-bold text-white/80 flex items-center gap-2">
+              <Timer className="w-3.5 h-3.5 text-primary" />
+              {canSkip ? "Ready" : `Wait ${timeLeft}s`}
             </div>
           </div>
 
-          {/* Premium Ad Content Area */}
-          <div className="relative flex-1 min-h-[300px] bg-black overflow-hidden flex items-center justify-center">
-            {(ad?.type === 'custom_banner' || ad?.type === 'adsterra') && ad.content && (
+          {/* Ad Content Area */}
+          <div className="relative w-full bg-black overflow-hidden" style={{ height: '300px' }}>
+            {smartLinkUrl ? (
+              <iframe
+                key={smartLinkUrl}
+                src={smartLinkUrl}
+                title="Sponsored Content"
+                className="w-full h-full"
+                style={{ border: 'none' }}
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"
+              />
+            ) : ad && (ad.type === 'custom_banner' || ad.type === 'adsterra') && ad.content ? (
               <iframe
                 key={ad.id}
                 title="Advertisement"
                 className="w-full h-full"
-                style={{ border: 'none', minHeight: '300px' }}
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"
-                srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden;}img,video{max-width:100%;border-radius:8px;}</style></head><body>${ad.content}</body></html>`}
+                style={{ border: 'none' }}
+                srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;display:flex;align-items:center;justify-content:center;min-height:100%;}</style></head><body>${ad.content}</body></html>`}
               />
-            )}
-
-            {ad?.type === 'custom_redirect' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center">
-                 <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 border border-primary/20">
-                    <ShieldCheck className="w-10 h-10 text-primary" />
-                 </div>
-                 <h3 className="text-2xl font-display font-bold text-white mb-3">{ad.title}</h3>
-                 <p className="text-white/50 text-sm mb-8 leading-relaxed">Support CineBot to keep our service free. Visit our sponsor to unlock your movie link.</p>
-                 <a 
-                   href={ad.content || "#"} 
-                   target="_blank" 
-                   rel="noopener noreferrer"
-                   className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-xl shadow-primary/20"
-                 >
-                   Visit Sponsor <ExternalLink className="w-4 h-4" />
-                 </a>
-              </div>
-            )}
+            ) : null}
           </div>
 
-          {/* Enhanced Footer */}
+          {/* Footer */}
           <div className="p-6 bg-[#181818] border-t border-white/5">
-            {/* Watch Ad to Support banner */}
             <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20">
               <div className="w-9 h-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
                 <Sparkles className="w-4 h-4 text-primary" />
@@ -160,25 +135,5 @@ export function AdOverlay({ ad, onComplete, isLoading }: AdOverlayProps) {
         </div>
       </motion.div>
     </AnimatePresence>
-  );
-}
-
-function ArrowRight(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
-    </svg>
   );
 }

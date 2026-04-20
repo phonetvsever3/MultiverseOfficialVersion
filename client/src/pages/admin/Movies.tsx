@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useMovies, useDeleteMovie, useCreateMovie, useUpdateMovie } from "@/hooks/use-movies";
-import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send, Download, AlertTriangle, Radio, CheckCircle2 } from "lucide-react";
+import { Plus, Search, Trash2, Film, Tv, Loader2, Edit2, ChevronRight, ChevronDown, PlusCircle, Database, FileVideo, Globe, Info, RefreshCw, Save, X, Bell, BellRing, Send, Download, AlertTriangle, Radio, CheckCircle2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -484,6 +484,9 @@ export default function AdminMovies() {
       fileId: "",
       fileSize: 0,
       fileUniqueId: "manual_" + Math.random().toString(36).substring(7),
+      isAdult: false,
+      contentRating: "none",
+      streamUrl: "",
     }
   });
 
@@ -563,6 +566,9 @@ export default function AdminMovies() {
       // Convert bytes → MB for editing
       fileSize: movie.fileSize ? Math.round(movie.fileSize / (1024 * 1024)) : 0,
       fileUniqueId: movie.fileUniqueId,
+      isAdult: movie.isAdult || false,
+      contentRating: movie.contentRating || "none",
+      streamUrl: movie.streamUrl || "",
     });
     setQualityUrlsList(
       Array.isArray(movie.qualityUrls)
@@ -601,6 +607,8 @@ export default function AdminMovies() {
     const dataWithBytes = {
       ...data,
       fileSize: (data.fileSize || 0) * 1024 * 1024,
+      contentRating: data.contentRating === "none" ? "" : (data.contentRating || ""),
+      streamUrl: data.streamUrl?.trim() || null,
       ...(movieCast.length > 0 ? { cast: movieCast } : {}),
       qualityUrls: qualityUrlsList.length > 0
         ? qualityUrlsList.map(({ mode, label, fileId, url, type }) =>
@@ -686,7 +694,7 @@ export default function AdminMovies() {
               <DialogTrigger asChild>
                 <Button
                   className="bg-primary hover:bg-primary/90 text-white font-black shadow-xl h-11 px-6 rounded-xl"
-                  onClick={() => { setEditingMovie(null); setMovieCast([]); setQualityUrlsList([]); form.reset({ type: "movie", quality: "720p", title: "", overview: "", posterPath: "", genre: "", releaseDate: "", tmdbId: undefined, fileId: "", fileSize: 0, fileUniqueId: "manual_" + Math.random().toString(36).substring(7) }); }}
+                  onClick={() => { setEditingMovie(null); setMovieCast([]); setQualityUrlsList([]); form.reset({ type: "movie", quality: "720p", title: "", overview: "", posterPath: "", genre: "", releaseDate: "", tmdbId: undefined, fileId: "", fileSize: 0, fileUniqueId: "manual_" + Math.random().toString(36).substring(7), isAdult: false, contentRating: "none", streamUrl: "" }); }}
                 >
                   <Plus className="w-5 h-5 mr-2" /> ADD MOVIE
                 </Button>
@@ -774,6 +782,55 @@ export default function AdminMovies() {
                       )}
                     />
 
+                    {/* Adult Content */}
+                    <div className="flex gap-3 items-start p-3 rounded-xl bg-red-950/20 border border-red-800/30">
+                      <Lock className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                      <div className="flex-1 space-y-3">
+                        <FormField
+                          control={form.control}
+                          name="isAdult"
+                          render={({ field }) => (
+                            <FormItem className="flex items-center gap-3">
+                              <FormControl>
+                                <input
+                                  type="checkbox"
+                                  checked={!!field.value}
+                                  onChange={e => field.onChange(e.target.checked)}
+                                  className="w-4 h-4 accent-red-500 cursor-pointer"
+                                  data-testid="checkbox-is-adult"
+                                />
+                              </FormControl>
+                              <FormLabel className="!mt-0 text-red-300 font-bold cursor-pointer">18+ Adult Content</FormLabel>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="contentRating"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">Rating</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value || ""}>
+                                <FormControl>
+                                  <SelectTrigger className="h-8 text-xs" data-testid="select-content-rating">
+                                    <SelectValue placeholder="Select rating" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="18+">18+</SelectItem>
+                                  <SelectItem value="21+">21+</SelectItem>
+                                  <SelectItem value="Adult">Adult</SelectItem>
+                                  <SelectItem value="Erotic">Erotic</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
+
                     {movieCast.length > 0 && (
                       <div className="p-3 bg-primary/5 rounded-lg border border-primary/20 text-xs">
                         <p className="font-bold text-primary mb-1">Cast (auto-filled from TMDB)</p>
@@ -836,6 +893,32 @@ export default function AdminMovies() {
                         )}
                       />
                     )}
+
+                    {/* Primary Stream URL */}
+                    <FormField
+                      control={form.control}
+                      name="streamUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Globe className="w-4 h-4 text-green-500" /> Primary Stream URL
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              value={field.value || ""}
+                              placeholder="https://example.com/stream.m3u8  or  https://cdn.example.com/video.mp4"
+                              className="bg-green-500/5 border-green-500/20 font-mono text-xs"
+                              data-testid="input-stream-url"
+                            />
+                          </FormControl>
+                          <FormDescription className="text-[10px]">
+                            Paste any direct URL — m3u8 (HLS), MP4, or external stream. Auto-detected format.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
                     {/* Multi-Quality Stream Sources */}
                     <div className="space-y-3">
@@ -1007,6 +1090,11 @@ export default function AdminMovies() {
                           {movie.type === 'series' && movie.status === 'ongoing' && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-400 text-[9px] font-black uppercase tracking-widest border border-green-500/25">
                               <Radio className="w-2.5 h-2.5" /> Ongoing
+                            </span>
+                          )}
+                          {movie.isAdult && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-400 text-[9px] font-black uppercase tracking-widest border border-red-500/25">
+                              <Lock className="w-2.5 h-2.5" /> {movie.contentRating || "18+"}
                             </span>
                           )}
                         </span>

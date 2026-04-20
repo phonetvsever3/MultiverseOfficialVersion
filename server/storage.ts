@@ -14,11 +14,11 @@ import {
   type StreamBackend, type InsertStreamBackend,
   type TiktokProject, type InsertTiktokProject,
 } from "@shared/schema";
-import { eq, desc, sql, like, ilike, and, gte, lte, inArray, or } from "drizzle-orm";
+import { eq, desc, sql, like, ilike, and, gte, lte, inArray, or, ne } from "drizzle-orm";
 
 export interface IStorage {
   // Movies
-  getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean }): Promise<{ items: Movie[], total: number }>;
+  getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean, isAdult?: boolean }): Promise<{ items: Movie[], total: number }>;
   getMoviesByIds(ids: number[]): Promise<Movie[]>;
   getTrendingByPeriod(days: number, limit?: number): Promise<Movie[]>;
   incrementMovieViews(id: number): Promise<void>;
@@ -141,7 +141,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(backups.createdAt))
       .limit(limit);
   }
-  async getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean }): Promise<{ items: Movie[], total: number }> {
+  async getMovies(params: { search?: string, type?: string, language?: string, limit?: number, offset?: number, sort?: string, status?: string, missingEpisodes?: boolean, isAdult?: boolean }): Promise<{ items: Movie[], total: number }> {
     const conditions = [];
     if (params.search) {
       const q = `%${params.search.toLowerCase()}%`;
@@ -155,6 +155,8 @@ export class DatabaseStorage implements IStorage {
     if (params.type) conditions.push(eq(movies.type, params.type as any));
     if (params.language) conditions.push(eq(movies.originalLanguage, params.language));
     if (params.status) conditions.push(eq(movies.status, params.status));
+    if (params.isAdult === true) conditions.push(eq(movies.isAdult, true));
+    else if (params.isAdult === false) conditions.push(sql`(${movies.isAdult} = false OR ${movies.isAdult} IS NULL)`);
     if (params.missingEpisodes) {
       conditions.push(sql`${movies.type} = 'series'`);
       conditions.push(sql`${movies.id} IN (
@@ -473,7 +475,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRandomAd(): Promise<Ad | undefined> {
-    const activeAds = await db.select().from(ads).where(eq(ads.isActive, true));
+    const activeAds = await db.select().from(ads).where(
+      and(eq(ads.isActive, true), ne(ads.type, 'fullscreen'))
+    );
     if (activeAds.length === 0) return undefined;
     return activeAds[Math.floor(Math.random() * activeAds.length)];
   }
