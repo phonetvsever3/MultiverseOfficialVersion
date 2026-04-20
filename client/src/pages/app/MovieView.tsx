@@ -1,20 +1,21 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMovie } from "@/hooks/use-movies";
-import { Button } from "@/components/ui/button";
-import { Calendar, Star, ShieldCheck, Film, Download, X, Tv, Database, ArrowRight, Sparkles, User, Zap, Play, ChevronLeft, Languages } from "lucide-react";
-import { AdOverlay } from "@/components/AdOverlay";
-import { useServeAd } from "@/hooks/use-ads";
-import { AdRenderer } from "@/components/AdRenderer";
-import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
-import { cn } from "@/lib/utils";
+import { Calendar, Star, Film, Download, Tv, Play, ChevronLeft, User, Sparkles, ArrowRight, X, Database, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { type Episode, type Ad, type Movie, type Settings } from "@shared/schema";
-import { fullscreenAdShownFor } from "@/lib/ad-session";
+import { type Episode, type Movie } from "@shared/schema";
 import { addToWatchHistory } from "@/lib/watch-history";
-import { translateToMyanmar } from "@/lib/translate";
+import { SmartLinkAdBox } from "@/components/SmartLinkAdBox";
+import { motion } from "framer-motion";
 
 const tg = (window as any).Telegram?.WebApp;
+const TMDB_IMAGE = "https://image.tmdb.org/t/p/";
+
+interface SmartLinkConfig {
+  url: string;
+  countdown: number;
+  interval: number;
+}
 
 interface TrailerInfo {
   key: string;
@@ -22,69 +23,71 @@ interface TrailerInfo {
   name: string;
 }
 
+function getPoster(path: string | null | undefined, size = "w780") {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  return `${TMDB_IMAGE}${size}${path}`;
+}
+
+function shouldShowAd(config: SmartLinkConfig): boolean {
+  if (!config.url) return false;
+  if (config.interval === 0) return true;
+  try {
+    const lastSeen = Number(localStorage.getItem("sl_last_seen") || "0");
+    if (!lastSeen) return true;
+    return Date.now() - lastSeen >= config.interval * 60 * 1000;
+  } catch {
+    return true;
+  }
+}
+
+function recordAdSeen() {
+  try { localStorage.setItem("sl_last_seen", String(Date.now())); } catch {}
+}
+
 export default function MovieView() {
   const [, params] = useRoute("/app/movie/:id");
   const [, setLocation] = useLocation();
   const movieId = parseInt(params?.id || "0");
-  const { data: movie, isLoading: isMovieLoading } = useMovie(movieId);
-  const { data: ad, isLoading: isAdLoading, refetch: refetchAd } = useServeAd();
-  const [showAd, setShowAd] = useState(false);
-  const [isReadyToWatch, setIsReadyToWatch] = useState(false);
-  const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const { data: movie, isLoading } = useMovie(movieId);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const [inlineAds, setInlineAds] = useState<Ad[]>([]);
-  const [fullscreenAd, setFullscreenAd] = useState<Ad | null>(null);
-  const [showFullscreenAd, setShowFullscreenAd] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
-  const [myanmarOverview, setMyanmarOverview] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
-
-  const mainButtonHandlerRef = useRef<() => void>(() => {});
-  const isListenerAttached = useRef(false);
+  const [adBox, setAdBox] = useState<{ mode: "watch" | "download"; action: () => void } | null>(null);
 
   const { data: trailer } = useQuery<TrailerInfo | null>({
     queryKey: [`/api/movies/${movieId}/trailer`],
     enabled: !!movie && !!movie.tmdbId && !movie.trailerUrl,
   });
 
-  // Extract YouTube video ID from various URL formats
-  const getYouTubeId = (url: string): string | null => {
-    const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
-    return match ? match[1] : null;
-  };
+  const { data: smartLinkConfig } = useQuery<SmartLinkConfig>({
+    queryKey: ["/api/public/smart-link"],
+    staleTime: 60000,
+  });
 
-  const customTrailerYouTubeId = movie?.trailerUrl ? getYouTubeId(movie.trailerUrl) : null;
-  const isCustomTrailerDirect = !!movie?.trailerUrl && !customTrailerYouTubeId;
-  const hasTrailer = !!(movie?.trailerUrl || trailer);
+  const { data: bannerAdConfig } = useQuery<{ code: string; enabled: boolean }>({
+    queryKey: ["/api/public/banner-ad"],
+    staleTime: 60000,
+  });
+
+  const { data: episodes } = useQuery<Episode[]>({
+    queryKey: [`/api/movies/${movieId}/episodes`],
+    enabled: !!movie && movie.type === "series",
+  });
 
   const { data: recommendedData } = useQuery<{ items: Movie[]; total: number }>({
     queryKey: [`/api/browse`, movie?.type, "rating", "", "", 1],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (movie?.type) params.set("type", movie.type);
-      params.set("sort", "rating");
-      params.set("page", "1");
-      const res = await fetch(`/api/browse?${params}`);
+      const p = new URLSearchParams();
+      if (movie?.type) p.set("type", movie.type);
+      p.set("sort", "rating");
+      p.set("page", "1");
+      const res = await fetch(`/api/browse?${p}`);
       return res.json();
     },
     enabled: !!movie,
   });
-  const recommendedMovies = (recommendedData?.items || []).filter(m => m.id !== movieId).slice(0, 10);
+  const recommendedMovies = (recommendedData?.items || []).filter((m) => m.id !== movieId).slice(0, 10);
 
-  useEffect(() => {
-    const loadAds = async () => {
-      try {
-        const res = await fetch("/api/ads");
-        const data = await res.json();
-        setInlineAds(data.filter((a: Ad) => a.isActive).slice(0, 2));
-      } catch (e) {
-        console.error("Error loading ads:", e);
-      }
-    };
-    loadAds();
-  }, []);
-
-  // Track view + watch history when the movie page opens
   useEffect(() => {
     if (!movieId) return;
     addToWatchHistory(movieId);
@@ -92,207 +95,67 @@ export default function MovieView() {
   }, [movieId]);
 
   useEffect(() => {
-    if (fullscreenAdShownFor.has(movieId)) return;
-    fullscreenAdShownFor.add(movieId);
-    const loadFullscreenAd = async () => {
-      try {
-        const res = await fetch("/api/ads/fullscreen");
-        const ad = await res.json();
-        if (ad) {
-          setFullscreenAd(ad);
-          setShowFullscreenAd(true);
-        }
-      } catch (e) {
-        console.error("Error loading fullscreen ad:", e);
-      }
-    };
-    loadFullscreenAd();
-  }, [movieId]);
+    if (tg) { tg.ready(); tg.expand(); tg.MainButton.hide(); }
+  }, []);
 
-  const { data: episodes } = useQuery<Episode[]>({
-    queryKey: [`/api/movies/${movieId}/episodes`],
-    enabled: !!movie && movie.type === 'series'
-  });
+  const triggerAction = useCallback((mode: "watch" | "download", action: () => void) => {
+    const config = smartLinkConfig || { url: "", countdown: 5, interval: 0 };
+    if (shouldShowAd(config)) {
+      setAdBox({ mode, action });
+    } else {
+      action();
+    }
+  }, [smartLinkConfig]);
 
-  const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 60000 });
-  const { data: smartLinkData } = useQuery<{ url: string; countdown: number; interval: number }>({ queryKey: ["/api/public/smart-link"], staleTime: 60000 });
-  const smartLinkUrl = smartLinkData?.url || "";
-  const smartLinkDuration = smartLinkData?.countdown ?? 5;
-  // interval is in minutes; 0 = always show
-  const smartLinkInterval = smartLinkData?.interval ?? 0;
+  const handleAdProceed = () => {
+    recordAdSeen();
+    const action = adBox?.action;
+    setAdBox(null);
+    setTimeout(() => action?.(), 50);
+  };
 
-  const SL_LAST_SEEN_KEY = "sl_last_seen";
+  const doWatch = useCallback((episodeId?: number) => {
+    const dest = episodeId ? `/app/stream/episode/${episodeId}` : `/app/stream/movie/${movieId}`;
+    triggerAction("watch", () => setLocation(dest));
+  }, [movieId, setLocation, triggerAction]);
 
-  const [showSmartLink, setShowSmartLink] = useState(false);
-  const [slCountdown, setSlCountdown] = useState(smartLinkDuration);
-  const [slMode, setSlMode] = useState<'watch' | 'download'>('watch');
-  const slTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const slRedirectedRef = useRef(false);
-  const slFallbackRef = useRef<(() => void) | null>(null);
-
-  const openSmartLinkUrl = useCallback((url: string) => {
-    try {
-      if (tg?.openLink) {
-        // try_instant_view: false forces the device browser instead of Telegram instant view
-        tg.openLink(url, { try_instant_view: false } as any);
-      } else {
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+  const doDownload = useCallback((episode?: Episode) => {
+    const action = () => {
+      fetch(`/api/movies/${movieId}/download`, { method: "POST" }).catch(() => {});
+      const hasStreamUrl = episode ? !!episode.streamUrl : !!movie?.streamUrl;
+      if (hasStreamUrl) {
+        const resourceId = episode ? episode.id : movieId;
+        const resourceType = episode ? "episode" : "movie";
+        const safeTitle = (movie?.title || "download").replace(/[^a-z0-9_\-\s]/gi, "_");
+        const a = document.createElement("a");
+        a.href = `/api/stream/${resourceType}/${resourceId}?download=1`;
+        a.download = `${safeTitle}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-      }
-    } catch (e) {
-      console.error('[SmartLink] open failed', e);
-    }
-  }, []);
-
-  const doSmartLinkRedirect = useCallback(() => {
-    if (slRedirectedRef.current) return;
-    slRedirectedRef.current = true;
-    if (slTimerRef.current) clearInterval(slTimerRef.current);
-    if (smartLinkUrl) {
-      openSmartLinkUrl(smartLinkUrl);
-    }
-    // Record when user last saw the ad
-    try { localStorage.setItem(SL_LAST_SEEN_KEY, String(Date.now())); } catch {}
-    setShowSmartLink(false);
-    setTimeout(() => {
-      slFallbackRef.current?.();
-    }, 300);
-  }, [smartLinkUrl, openSmartLinkUrl]);
-
-  const startSmartLink = useCallback((fallback?: () => void, mode: 'watch' | 'download' = 'watch') => {
-    // Check interval: if enough time hasn't passed, skip the ad
-    if (smartLinkInterval > 0) {
-      try {
-        const lastSeen = Number(localStorage.getItem(SL_LAST_SEEN_KEY) || "0");
-        const elapsed = Date.now() - lastSeen;
-        const intervalMs = smartLinkInterval * 60 * 1000;
-        if (lastSeen > 0 && elapsed < intervalMs) {
-          // Not time yet — skip ad and go directly to content
-          fallback?.();
-          return;
-        }
-      } catch {}
-    }
-
-    slFallbackRef.current = fallback || null;
-    const duration = smartLinkDuration > 0 ? smartLinkDuration : 5;
-    setSlCountdown(duration);
-    setSlMode(mode);
-    slRedirectedRef.current = false;
-    setShowSmartLink(true);
-    if (slTimerRef.current) clearInterval(slTimerRef.current);
-    slTimerRef.current = setInterval(() => {
-      setSlCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(slTimerRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [smartLinkDuration, smartLinkInterval]);
-
-  useEffect(() => {
-    return () => { if (slTimerRef.current) clearInterval(slTimerRef.current); };
-  }, []);
-
-  // Auto-redirect when countdown reaches 0
-  useEffect(() => {
-    if (showSmartLink && slCountdown === 0) {
-      doSmartLinkRedirect();
-    }
-  }, [slCountdown, showSmartLink, doSmartLinkRedirect]);
-
-  useEffect(() => {
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      tg.MainButton.hide();
-      
-      const masterHandler = () => {
-        if (mainButtonHandlerRef.current) mainButtonHandlerRef.current();
-      };
-
-      if (!isListenerAttached.current) {
-        tg.MainButton.onClick(masterHandler);
-        isListenerAttached.current = true;
-      }
-
-      return () => {
-        if (tg.MainButton) {
-          tg.MainButton.offClick(masterHandler);
-          tg.MainButton.hide();
-        }
-        isListenerAttached.current = false;
-      };
-    }
-  }, []);
-
-  useEffect(() => {
-    mainButtonHandlerRef.current = () => {
-      const idToSend = selectedEpisode ? `ep_${selectedEpisode.id}` : movieId;
-      const botUsername = "MultiverseMovies_Bot"; 
-      const deepLink = `https://t.me/${botUsername}?start=${idToSend}`;
-      
-      if (tg) {
-        try { tg.sendData(String(selectedEpisode ? selectedEpisode.id : movieId)); } catch (e) {}
-        tg.openTelegramLink(deepLink);
-        if (tg.MainButton) {
-          tg.MainButton.setParams({ text: "CHECK BOT CHAT ✅", color: "#22c55e", is_active: false });
-        }
-        setTimeout(() => tg.close(), 2000);
       } else {
-        window.open(deepLink, '_blank');
+        const idToSend = episode ? `ep_${episode.id}` : movieId;
+        const deepLink = `https://t.me/MultiverseMovies_Bot?start=${idToSend}`;
+        if (tg) {
+          try { tg.sendData(String(episode ? episode.id : movieId)); } catch {}
+          tg.openTelegramLink(deepLink);
+        } else {
+          window.open(deepLink, "_blank");
+        }
       }
     };
-  }, [selectedEpisode, movieId]);
+    triggerAction("download", action);
+  }, [movieId, movie, triggerAction]);
 
-  const handleDownloadClick = (episode?: Episode) => {
-    if (episode) setSelectedEpisode(episode);
-    setIsReadyToWatch(false);
-    setShowAd(true);
-    refetchAd();
+  const getYouTubeId = (url: string) => {
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
   };
 
-  const handleAdComplete = () => {
-    setShowAd(false);
-    setIsReadyToWatch(true);
-    if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-  };
-
-  useEffect(() => {
-    if (!movie?.overview) return;
-    setMyanmarOverview(null);
-    setIsTranslating(true);
-    translateToMyanmar(movie.overview).then((translated) => {
-      setMyanmarOverview(translated);
-      setIsTranslating(false);
-    });
-  }, [movie?.overview]);
-
-  const handleBack = () => {
-    setLocation("/app");
-  };
-
-  const formatFileSize = (bytes: number | null) => {
-    if (!bytes || bytes === 0) return "Unknown";
-    const gb = bytes / (1024 * 1024 * 1024);
-    if (gb >= 1) return gb.toFixed(2) + " GB";
-    const mb = bytes / (1024 * 1024);
-    if (mb >= 1) return mb.toFixed(2) + " MB";
-    const kb = bytes / 1024;
-    return kb.toFixed(2) + " KB";
-  };
-
-  if (isMovieLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center text-primary animate-pulse">
-        <Film className="w-8 h-8" />
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="w-10 h-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
       </div>
     );
   }
@@ -300,569 +163,420 @@ export default function MovieView() {
   if (!movie) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white p-6 text-center">
-        <h2 className="text-xl font-bold mb-2">Movie Not Found</h2>
-        <p className="text-muted-foreground">This content may have been removed.</p>
-        <Button className="mt-6" onClick={handleBack}>← Back to Home</Button>
+        <Film className="w-12 h-12 text-white/20 mb-4" />
+        <h2 className="text-xl font-bold mb-2">Not Found</h2>
+        <p className="text-white/40 text-sm mb-6">This content may have been removed.</p>
+        <button className="px-6 py-3 bg-primary rounded-2xl text-white font-bold text-sm" onClick={() => setLocation("/app")}>
+          Back to Home
+        </button>
       </div>
     );
   }
 
+  const poster = getPoster(movie.posterPath, "w780");
+  const customTrailerYouTubeId = movie.trailerUrl ? getYouTubeId(movie.trailerUrl) : null;
+  const isCustomTrailerDirect = !!movie.trailerUrl && !customTrailerYouTubeId;
+  const hasTrailer = !!(movie.trailerUrl || trailer);
+
+  const seasonNumbers = episodes ? [...new Set(episodes.map((e) => e.seasonNumber))].sort((a, b) => a - b) : [];
+  const activeSeason = selectedSeason ?? seasonNumbers[0];
+  const seasonEpisodes = (episodes || []).filter((e) => e.seasonNumber === activeSeason).sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+  const genres = movie.genre ? movie.genre.split(",").map(g => g.trim()).filter(Boolean).slice(0, 3) : [];
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-body pb-20">
-      <div className="fixed inset-0 z-0 overflow-hidden">
-         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#0a0a0a] to-[#0a0a0a] z-10" />
-         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/20 blur-[120px] rounded-full animate-pulse" />
-         <div className="absolute bottom-[10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[100px] rounded-full animate-pulse delay-1000" />
-      </div>
+    <div className="min-h-screen pb-24" style={{ background: "#080808" }}>
 
-      {/* Back Button */}
-      <div className="fixed top-0 left-0 right-0 z-50 flex items-center px-4 pt-4 pb-2">
+      {/* ── Hero Poster ── */}
+      <div className="relative w-full overflow-hidden" style={{ minHeight: "65vw", maxHeight: "72vh" }}>
+        {poster ? (
+          <img
+            src={poster}
+            alt={movie.title}
+            className="w-full h-full object-cover"
+            style={{ minHeight: "65vw", maxHeight: "72vh" }}
+            loading="eager"
+          />
+        ) : (
+          <div className="w-full flex items-center justify-center bg-gray-900" style={{ minHeight: "65vw", maxHeight: "72vh" }}>
+            <Film className="w-24 h-24 text-white/10" />
+          </div>
+        )}
+
+        {/* Multi-layer gradient */}
+        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 30%, transparent 55%, rgba(8,8,8,0.9) 80%, #080808 100%)" }} />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 50%)" }} />
+
+        {/* Back */}
         <button
-          onClick={handleBack}
-          className="flex items-center gap-1.5 bg-white/10 backdrop-blur-md border border-white/10 rounded-full px-4 py-2 text-white/80 text-xs font-bold hover:bg-white/20 active:scale-95 transition-all"
+          onClick={() => setLocation("/app")}
+          data-testid="button-back"
+          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold text-white/80 active:scale-95 transition-all"
+          style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)" }}
         >
-          <ChevronLeft className="w-4 h-4" />
-          Back
+          <ChevronLeft className="w-4 h-4" /> Back
         </button>
-      </div>
 
-      <div className="relative z-10 px-6 pt-16 pb-6 flex flex-col items-center">
-        <div className="w-56 aspect-[2/3] bg-gradient-to-b from-gray-700 to-gray-900 rounded-[2.5rem] shadow-[0_0_60px_rgba(225,29,72,0.25)] border border-white/10 mb-10 flex items-center justify-center relative overflow-hidden group">
-          {movie.posterPath ? (
-            <img 
-              src={movie.posterPath.startsWith("http") ? movie.posterPath : `https://image.tmdb.org/t/p/w342${movie.posterPath}`}
-              alt={movie.title}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-              loading="eager"
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-3">
-              <Film className="w-16 h-16 text-white/20" />
-              <span className="text-[10px] text-white/30 text-center px-2">{movie.title}</span>
-            </div>
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent pointer-events-none" />
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-primary backdrop-blur-md text-white text-[10px] font-black rounded-full shadow-xl uppercase tracking-[0.2em] border border-white/20">
+        {/* Quality badge */}
+        {movie.quality && (
+          <div className="absolute top-4 right-4 z-20 rounded-full px-3 py-1 text-[10px] font-black text-white uppercase tracking-widest" style={{ background: "rgba(220,38,38,0.85)", backdropFilter: "blur(8px)" }}>
             {movie.quality}
           </div>
-        </div>
+        )}
 
-        <div className="flex items-center gap-2 mb-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/5 animate-in slide-in-from-top duration-500">
-           <Sparkles className="w-3.5 h-3.5 text-primary" />
-           <span className="text-[10px] font-black text-white/60 uppercase tracking-[0.15em]">Verified Premium</span>
-        </div>
-
-        <h1 className="text-4xl font-display font-black text-center mb-4 tracking-tighter leading-none bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60 px-4">
-          {movie.title}
-        </h1>
-        
-        <div className="flex items-center gap-5 text-[11px] font-bold text-white/30 mb-6 uppercase tracking-widest">
-           <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> {movie.releaseDate ? movie.releaseDate.split("-")[0] : "N/A"}</span>
-           <span className="w-1 h-1 rounded-full bg-primary/30" />
-           <span className="flex items-center gap-1.5 text-yellow-500/60"><Star className="w-3.5 h-3.5 fill-current" /> {(movie.rating || 0) / 10}</span>
-           <span className="w-1 h-1 rounded-full bg-primary/30" />
-           <span className="text-primary/50">{movie.type}</span>
-        </div>
-
-        {/* Trailer Button */}
-        {hasTrailer && (
-          <div className="w-full max-w-sm mb-6 px-4">
-            {showTrailer ? (
-              <div className="relative w-full rounded-2xl overflow-hidden aspect-video bg-black border border-white/10">
-                {isCustomTrailerDirect ? (
-                  <video
-                    className="w-full h-full"
-                    src={movie!.trailerUrl!}
-                    autoPlay
-                    controls
-                    playsInline
-                  />
-                ) : (
-                  <iframe
-                    className="w-full h-full"
-                    src={`https://www.youtube.com/embed/${customTrailerYouTubeId || trailer?.key}?autoplay=1&rel=0`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    title={movie?.title || trailer?.name}
-                  />
-                )}
-                <button
-                  onClick={() => setShowTrailer(false)}
-                  className="absolute top-2 right-2 w-8 h-8 bg-black/70 rounded-full flex items-center justify-center hover:bg-black/90 transition-all"
-                >
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowTrailer(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/70 text-sm font-bold hover:bg-white/10 active:scale-95 transition-all"
-              >
-                <Play className="w-4 h-4 text-red-500 fill-red-500" />
-                Watch Trailer
-              </button>
+        {/* Title overlaid at bottom of poster */}
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-5 pb-5">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: "rgba(220,38,38,0.15)", border: "1px solid rgba(220,38,38,0.3)" }}>
+              <Sparkles className="w-3 h-3 text-red-400" />
+              <span className="text-[9px] font-black text-red-300 uppercase tracking-widest">Verified Premium</span>
+            </div>
+          </div>
+          <h1 className="text-3xl font-black text-white leading-tight mb-2 drop-shadow-2xl">{movie.title}</h1>
+          <div className="flex items-center gap-3 text-xs font-bold text-white/50 flex-wrap">
+            {movie.releaseDate && (
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" />
+                {movie.releaseDate.slice(0, 4)}
+              </span>
             )}
+            {movie.rating && movie.rating > 0 ? (
+              <>
+                <span className="w-1 h-1 rounded-full bg-white/20" />
+                <span className="flex items-center gap-1 text-yellow-400">
+                  <Star className="w-3.5 h-3.5 fill-current" />
+                  {(movie.rating / 10).toFixed(1)}
+                </span>
+              </>
+            ) : null}
+            <span className="w-1 h-1 rounded-full bg-white/20" />
+            <span className="capitalize text-primary/70">{movie.type}</span>
           </div>
-        )}
-
-        {movie.overview && (
-          <div className="w-full max-w-sm mb-10 px-6 space-y-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Languages className="w-3.5 h-3.5 text-primary/60" />
-              <span className="text-[9px] uppercase tracking-widest text-white/20 font-bold">Description</span>
-            </div>
-            <p className="text-sm text-white/40 text-center leading-relaxed italic">
-              "{movie.overview}"
-            </p>
-            <div className="border-t border-white/5 pt-3">
-              <div className="flex items-center gap-1.5 mb-2 justify-center">
-                <span className="text-[9px] uppercase tracking-widest text-primary/50 font-bold">မြန်မာဘာသာ</span>
-              </div>
-              {isTranslating ? (
-                <div className="flex justify-center py-2">
-                  <div className="w-4 h-4 border border-primary/40 border-t-primary rounded-full animate-spin" />
-                </div>
-              ) : myanmarOverview ? (
-                <p className="text-sm text-white/30 text-center leading-relaxed">
-                  {myanmarOverview}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        )}
-
-        <div className="w-full max-w-sm space-y-6 px-4">
-           {isReadyToWatch ? (
-             <div className="space-y-4 animate-in fade-in zoom-in duration-700">
-               <Button
-                 size="lg"
-                 className="w-full h-20 text-xl font-black bg-green-500 hover:bg-green-600 text-white rounded-[2rem] shadow-[0_20px_60px_rgba(34,197,94,0.4)] flex items-center justify-center gap-4 border-b-8 border-green-950 active:border-b-0 active:translate-y-2 transition-all"
-                 onClick={() => startSmartLink(() => setLocation(selectedEpisode ? `/app/stream/episode/${selectedEpisode.id}` : `/app/stream/movie/${movieId}`))}
-                 data-testid="button-watch-now"
-               >
-                 <Play className="w-7 h-7 fill-white" /> Watch Now
-               </Button>
-               <button
-                 onClick={() => startSmartLink(() => {
-                   // Determine source: streamUrl = direct download, fileId only = Telegram bot
-                   const hasStreamUrl = selectedEpisode
-                     ? !!selectedEpisode.streamUrl
-                     : !!movie?.streamUrl;
-
-                   if (hasStreamUrl) {
-                     // Direct HTTP download via stream endpoint
-                     const resourceId = selectedEpisode ? selectedEpisode.id : movieId;
-                     const resourceType = selectedEpisode ? 'episode' : 'movie';
-                     const safeTitle = (movie?.title || 'download').replace(/[^a-z0-9_\-\s]/gi, '_');
-                     const url = `/api/stream/${resourceType}/${resourceId}?download=1`;
-                     const a = document.createElement('a');
-                     a.href = url;
-                     a.download = `${safeTitle}.mp4`;
-                     document.body.appendChild(a);
-                     a.click();
-                     document.body.removeChild(a);
-                   } else {
-                     // fileId-only: ask the Telegram bot to send the file to the user's chat
-                     const idToSend = selectedEpisode ? `ep_${selectedEpisode.id}` : movieId;
-                     const botUsername = "MultiverseMovies_Bot";
-                     const deepLink = `https://t.me/${botUsername}?start=${idToSend}`;
-                     if (tg) {
-                       try { tg.sendData(String(selectedEpisode ? selectedEpisode.id : movieId)); } catch (_) {}
-                       tg.openTelegramLink(deepLink);
-                     } else {
-                       window.open(deepLink, '_blank');
-                     }
-                   }
-                 }, 'download')}
-                 className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:bg-white/10 active:scale-95 transition-all"
-                 data-testid="button-get-on-bot"
-               >
-                 <Download className="w-4 h-4" /> Download Now
-               </button>
-             </div>
-           ) : (
-             movie.type === 'movie' && (
-               <div className="flex flex-col gap-4">
-                 <Button
-                   size="lg"
-                   className="w-full h-18 text-lg font-black bg-primary hover:bg-primary/90 text-white rounded-[1.8rem] shadow-2xl shadow-primary/40 relative overflow-hidden group border-b-6 border-black/20 py-5"
-                   onClick={() => handleDownloadClick()}
-                   data-testid="button-watch-now-unlock"
-                 >
-                   <Play className="w-6 h-6 mr-3 fill-current" /> Watch Now
-                 </Button>
-               </div>
-             )
-           )}
         </div>
+      </div>
 
-        {movie.type === 'series' && episodes && episodes.length > 0 && !isReadyToWatch && (() => {
-          const seasonNumbers = [...new Set(episodes.map(e => e.seasonNumber))].sort((a, b) => a - b);
-          const activeSeason = selectedSeason ?? seasonNumbers[0];
-          const seasonEpisodes = episodes
-            .filter(e => e.seasonNumber === activeSeason)
-            .sort((a, b) => a.episodeNumber - b.episodeNumber);
+      {/* ── Genre chips ── */}
+      {genres.length > 0 && (
+        <div className="flex gap-2 px-5 pt-4 flex-wrap">
+          {genres.map((g) => (
+            <span key={g} className="rounded-full px-3 py-1 text-[10px] font-bold text-white/50 uppercase tracking-wider" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              {g}
+            </span>
+          ))}
+        </div>
+      )}
 
-          return (
-            <div className="w-full max-w-sm mt-16">
-              {/* Header */}
-              <h2 className="text-[10px] font-black mb-5 flex items-center gap-3 uppercase tracking-[0.3em] text-white/20 px-4">
-                <Tv className="w-4 h-4 text-primary" /> Seasons & Episodes
-              </h2>
+      {/* ── Action Buttons for Movies ── */}
+      {movie.type === "movie" && (
+        <div className="px-5 pt-5 flex flex-col gap-3">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            data-testid="button-watch"
+            onClick={() => doWatch()}
+            className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-base text-white relative overflow-hidden"
+            style={{ background: "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)", boxShadow: "0 8px 32px rgba(220,38,38,0.4)" }}
+          >
+            <div className="absolute inset-0 opacity-0 hover:opacity-100 transition-opacity" style={{ background: "rgba(255,255,255,0.05)" }} />
+            <Play className="w-5 h-5 fill-white" />
+            Watch Now
+          </motion.button>
 
-              {/* Season tabs */}
-              {seasonNumbers.length > 0 && (
-                <div className="flex gap-2 overflow-x-auto scrollbar-hide px-4 pb-1 mb-6">
-                  {seasonNumbers.map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setSelectedSeason(s)}
-                      className={cn(
-                        "flex-shrink-0 px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all duration-200",
-                        activeSeason === s
-                          ? "bg-primary text-white shadow-lg shadow-primary/30 scale-105"
-                          : "bg-white/5 text-white/40 border border-white/[0.08] hover:bg-white/10 hover:text-white/70"
-                      )}
-                      data-testid={`season-tab-${s}`}
-                    >
-                      Season {s}
-                    </button>
-                  ))}
-                </div>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            data-testid="button-download"
+            onClick={() => doDownload()}
+            className="w-full flex items-center justify-center gap-3 py-3.5 rounded-2xl font-bold text-sm text-white/70"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            <Download className="w-4.5 h-4.5" />
+            Download
+          </motion.button>
+        </div>
+      )}
+
+      {/* ── 320x50 Banner Ad ── */}
+      {bannerAdConfig?.enabled && bannerAdConfig?.code && (
+        <div className="flex justify-center px-5 pt-4">
+          <div
+            className="overflow-hidden rounded-lg"
+            style={{ width: "320px", height: "50px", background: "transparent" }}
+            data-testid="banner-ad"
+          >
+            <iframe
+              srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;overflow:hidden}</style></head><body>${bannerAdConfig.code}</body></html>`}
+              width="320"
+              height="50"
+              className="border-0"
+              title="Advertisement"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox"
+              scrolling="no"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Trailer ── */}
+      {hasTrailer && (
+        <div className="px-5 pt-4">
+          {showTrailer ? (
+            <div className="relative w-full rounded-2xl overflow-hidden aspect-video bg-black border border-white/10">
+              {isCustomTrailerDirect ? (
+                <video className="w-full h-full" src={movie.trailerUrl!} autoPlay controls playsInline />
+              ) : (
+                <iframe
+                  className="w-full h-full border-0"
+                  src={`https://www.youtube.com/embed/${customTrailerYouTubeId || trailer?.key}?autoplay=1&rel=0`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title={movie.title}
+                />
               )}
-
-              {/* Episode count */}
-              <div className="text-[9px] text-white/20 font-black uppercase tracking-widest mb-4 px-4">
-                {seasonEpisodes.length} Episode{seasonEpisodes.length !== 1 ? 's' : ''}
-              </div>
-
-              {/* Episode list */}
-              <div className="space-y-4 px-4">
-                {seasonEpisodes.map((ep) => (
-                  <div
-                    key={ep.id}
-                    className="bg-[#111] border border-white/5 p-5 rounded-[1.5rem] hover:bg-white/[0.04] transition-all cursor-pointer group hover:scale-[1.01] active:scale-[0.98] shadow-xl"
-                    onClick={() => handleDownloadClick(ep)}
-                    data-testid={`episode-card-${ep.id}`}
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        {/* Episode number pill */}
-                        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                          <span className="text-[11px] font-black text-primary">{ep.episodeNumber}</span>
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-black text-[11px] text-white/85 line-clamp-1 leading-tight">{ep.title || `Episode ${ep.episodeNumber}`}</div>
-                          {ep.airDate && (
-                            <div className="text-[9px] text-white/25 font-medium mt-0.5">{ep.airDate}</div>
-                          )}
-                        </div>
-                      </div>
-                      {ep.rating ? (
-                        <div className="flex-shrink-0 flex items-center gap-1 text-[9px] text-yellow-500 font-black bg-yellow-500/5 px-2.5 py-1 rounded-full border border-yellow-500/10 ml-2">
-                          <Star className="w-2.5 h-2.5 fill-current" /> {(ep.rating / 10).toFixed(1)}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {ep.overview && (
-                      <p className="text-[10px] text-white/20 line-clamp-2 leading-relaxed mb-4 font-medium ml-12">{ep.overview}</p>
-                    )}
-
-                    <div className="flex justify-between items-center ml-12">
-                      <div className="px-3 py-1.5 bg-primary/5 rounded-xl border border-primary/10">
-                        <span className="text-[9px] text-primary font-black uppercase tracking-widest flex items-center gap-1.5">
-                          <Database className="w-3 h-3" /> {formatFileSize(ep.fileSize)}
-                        </span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDownloadClick(ep); }}
-                          data-testid={`button-play-ep-${ep.id}`}
-                          className="h-8 px-4 text-[10px] font-black text-white bg-primary hover:bg-primary/90 rounded-full uppercase tracking-tighter flex items-center gap-1.5 transition-colors active:scale-95"
-                        >
-                          <Play className="w-3 h-3 fill-white" /> Watch
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <button onClick={() => setShowTrailer(false)} className="absolute top-2 right-2 w-8 h-8 bg-black/70 rounded-full flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
             </div>
-          );
-        })()}
+          ) : (
+            <button
+              onClick={() => setShowTrailer(true)}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-white/50 text-sm font-bold active:scale-95 transition-all"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+            >
+              <Play className="w-4 h-4 text-red-500 fill-red-500" />
+              Watch Trailer
+            </button>
+          )}
+        </div>
+      )}
 
-        {/* Cast Section */}
-        {movie.cast && Array.isArray(movie.cast) && movie.cast.length > 0 && (
-          <div className="w-full max-w-sm mt-12">
-            <h2 className="text-[10px] font-black mb-5 flex items-center gap-2 uppercase tracking-[0.3em] text-white/30 px-4">
-              <User className="w-4 h-4 text-primary" /> Cast
+      {/* ── Overview ── */}
+      {movie.overview && (
+        <div className="px-5 pt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-0.5 h-4 rounded-full bg-primary" />
+            <span className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Synopsis</span>
+          </div>
+          <p className="text-sm text-white/50 leading-relaxed">{movie.overview}</p>
+        </div>
+      )}
+
+      {/* ── Stats row ── */}
+      <div className="px-5 pt-6">
+        <div className="flex gap-3">
+          {movie.views != null && (
+            <div className="flex-1 rounded-2xl p-3 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="text-lg font-black text-white">{(movie.views || 0).toLocaleString()}</div>
+              <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest mt-0.5">Views</div>
+            </div>
+          )}
+          {movie.downloads != null && (
+            <div className="flex-1 rounded-2xl p-3 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="text-lg font-black text-white">{(movie.downloads || 0).toLocaleString()}</div>
+              <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest mt-0.5">Downloads</div>
+            </div>
+          )}
+          {movie.fileSize && (
+            <div className="flex-1 rounded-2xl p-3 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="text-sm font-black text-white flex items-center justify-center gap-1">
+                <Database className="w-3.5 h-3.5 text-primary/60" />
+                {movie.fileSize >= 1073741824 ? (movie.fileSize / 1073741824).toFixed(1) + " GB" : (movie.fileSize / 1048576).toFixed(0) + " MB"}
+              </div>
+              <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest mt-0.5">Size</div>
+            </div>
+          )}
+          <div className="flex-1 rounded-2xl p-3 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="text-sm font-black text-white flex items-center justify-center gap-1">
+              <Shield className="w-3.5 h-3.5 text-green-500/60" />
+              Secure
+            </div>
+            <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest mt-0.5">Source</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Series Episodes ── */}
+      {movie.type === "series" && episodes && episodes.length > 0 && (
+        <div className="px-5 pt-8">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-0.5 h-4 rounded-full bg-primary" />
+            <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 flex items-center gap-2">
+              <Tv className="w-3.5 h-3.5 text-primary" /> Seasons & Episodes
             </h2>
-            <div className="flex gap-3 overflow-x-auto pb-3 px-4 scrollbar-hide snap-x snap-mandatory">
-              {movie.cast.slice(0, 10).map((actor: any, idx: number) => (
-                <div
-                  key={idx}
-                  onClick={() => setLocation(`/app/browse?actor=${encodeURIComponent(actor.name)}&sort=rating`)}
-                  className="flex-shrink-0 w-[100px] snap-start group cursor-pointer active:scale-95 transition-transform"
-                  data-testid={`cast-card-${idx}`}
+          </div>
+
+          {seasonNumbers.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1 mb-5" style={{ scrollbarWidth: "none" }}>
+              {seasonNumbers.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSelectedSeason(s)}
+                  data-testid={`season-tab-${s}`}
+                  className="flex-shrink-0 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  style={
+                    activeSeason === s
+                      ? { background: "linear-gradient(135deg, #ef4444, #b91c1c)", color: "white", boxShadow: "0 4px 16px rgba(220,38,38,0.35)" }
+                      : { background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
+                  }
                 >
-                  {/* Profile Photo */}
-                  <div className="relative w-[100px] h-[130px] rounded-2xl overflow-hidden mb-2.5 border border-white/10 shadow-lg shadow-black/50 group-hover:border-primary/40 transition-all duration-300">
-                    {actor.profilePath ? (
-                      <>
-                        <img
-                          src={`https://image.tmdb.org/t/p/w185${actor.profilePath}`}
-                          alt={actor.name}
-                          className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500"
-                        />
-                        {/* Bottom gradient overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                      </>
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-white/5 to-white/[0.02] flex items-center justify-center">
-                        <User className="w-8 h-8 text-white/20" />
-                      </div>
-                    )}
-                    {/* Rank badge for top 3 */}
-                    {idx < 3 && (
-                      <div className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/30">
-                        <span className="text-[9px] font-black text-white">{idx + 1}</span>
-                      </div>
-                    )}
-                  </div>
-                  {/* Info */}
-                  <div className="px-0.5">
-                    <div className="text-[10px] font-black text-white/90 truncate leading-tight mb-0.5">{actor.name}</div>
-                    <div className="text-[9px] font-medium text-primary/70 truncate leading-tight italic">{actor.character}</div>
-                  </div>
-                </div>
+                  Season {s}
+                </button>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Inline Ads Section */}
-        {inlineAds.length > 0 && (
-          <div className="w-full max-w-sm mt-12 px-4">
-            <h2 className="text-[10px] font-black mb-5 flex items-center gap-2 uppercase tracking-[0.3em] text-white/30">
-              <Zap className="w-4 h-4 text-yellow-500" /> Sponsored Ads
-            </h2>
-            {inlineAds.map((ad) => (
-              <div key={ad.id} className="bg-white/5 rounded-[2rem] p-4 border border-white/5 mb-5 overflow-hidden min-h-[160px] flex items-center justify-center">
-                <AdRenderer ad={ad} />
+          <div className="text-[9px] text-white/25 font-black uppercase tracking-widest mb-3">
+            {seasonEpisodes.length} Episode{seasonEpisodes.length !== 1 ? "s" : ""}
+          </div>
+
+          <div className="space-y-3">
+            {seasonEpisodes.map((ep) => (
+              <div
+                key={ep.id}
+                className="rounded-2xl p-4"
+                data-testid={`episode-card-${ep.id}`}
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}
+              >
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}>
+                    <span className="text-[10px] font-black text-primary">{ep.episodeNumber}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm text-white/85 line-clamp-1">{ep.title || `Episode ${ep.episodeNumber}`}</div>
+                    {ep.airDate && <div className="text-[9px] text-white/25 mt-0.5">{ep.airDate}</div>}
+                    {ep.overview && <p className="text-[10px] text-white/25 line-clamp-2 mt-1 leading-relaxed">{ep.overview}</p>}
+                  </div>
+                  {ep.rating ? (
+                    <div className="flex-shrink-0 flex items-center gap-1 text-[9px] text-yellow-500 font-bold">
+                      <Star className="w-2.5 h-2.5 fill-current" />
+                      {(ep.rating / 10).toFixed(1)}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex gap-2 pl-11">
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => doWatch(ep.id)}
+                    data-testid={`button-watch-ep-${ep.id}`}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-white text-[11px] font-black"
+                    style={{ background: "linear-gradient(135deg, #ef4444, #b91c1c)", boxShadow: "0 4px 12px rgba(220,38,38,0.3)" }}
+                  >
+                    <Play className="w-3.5 h-3.5 fill-white" /> Watch
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => doDownload(ep)}
+                    data-testid={`button-download-ep-${ep.id}`}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-white/60 text-[11px] font-bold"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download
+                  </motion.button>
+                </div>
               </div>
             ))}
           </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-5 w-full max-w-sm mt-12 px-4">
-           <div className="bg-[#111] border border-white/5 rounded-[2rem] p-8 text-center group hover:bg-white/[0.04] transition-all shadow-xl">
-              <div className="w-14 h-14 rounded-[1.2rem] bg-green-500/5 flex items-center justify-center mx-auto mb-5 border border-green-500/10 group-hover:scale-110 transition-transform">
-                <ShieldCheck className="w-7 h-7 text-green-500/60" />
-              </div>
-              <div className="text-[9px] text-white/20 uppercase font-black tracking-[0.2em] mb-2">Status</div>
-              <div className="font-black text-sm text-white/60">Secure</div>
-           </div>
-           <div className="bg-[#111] border border-white/5 rounded-[2rem] p-8 text-center group hover:bg-white/[0.04] transition-all shadow-xl">
-              <div className="w-14 h-14 rounded-[1.2rem] bg-blue-500/5 flex items-center justify-center mx-auto mb-5 border border-blue-500/10 group-hover:scale-110 transition-transform">
-                <Database className="w-7 h-7 text-blue-500/60" />
-              </div>
-              <div className="text-[9px] text-white/20 uppercase font-black tracking-[0.2em] mb-2">Source</div>
-              <div className="font-black text-sm text-white/60">Cloud</div>
-           </div>
         </div>
+      )}
 
-        {/* Recommended For You */}
-        {recommendedMovies.length > 0 && (
-          <div className="w-full mt-10">
-            <div className="flex items-center justify-between px-4 mb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-yellow-400" />
-                <span className="text-sm font-black text-white uppercase tracking-wider">You May Also Like</span>
-              </div>
-              <button
-                onClick={() => setLocation(`/app/browse?type=${movie.type}&sort=rating&title=Recommended`)}
-                className="flex items-center gap-1 text-[10px] text-primary font-bold active:scale-95 transition-all"
-              >
-                All <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: 'none' }}>
-              {recommendedMovies.map((rec) => {
-                const recPoster = rec.posterPath
-                  ? rec.posterPath.startsWith('http') ? rec.posterPath : `https://image.tmdb.org/t/p/w342${rec.posterPath}`
-                  : null;
-                return (
-                  <button
-                    key={rec.id}
-                    onClick={() => setLocation(`/app/movie/${rec.id}`)}
-                    className="flex-shrink-0 w-24 text-left"
-                    data-testid={`card-recommended-${rec.id}`}
-                  >
-                    <div className="relative w-24 h-36 rounded-xl overflow-hidden bg-white/5 border border-white/5 mb-1.5">
-                      {recPoster ? (
-                        <img src={recPoster} alt={rec.title} className="w-full h-full object-cover" loading="lazy" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          {rec.type === 'series' ? <Tv className="w-6 h-6 text-white/20" /> : <Film className="w-6 h-6 text-white/20" />}
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                      {rec.rating && rec.rating > 0 && (
-                        <div className="absolute top-1 right-1 bg-black/70 rounded px-1 py-0.5 flex items-center gap-0.5">
-                          <Star className="w-2 h-2 text-yellow-400 fill-yellow-400" />
-                          <span className="text-[8px] font-bold text-white">{(rec.rating / 10).toFixed(1)}</span>
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[9px] text-white/70 font-semibold truncate leading-tight">{rec.title}</p>
-                    {rec.releaseDate && (
-                      <p className="text-[8px] text-white/30">{rec.releaseDate.slice(0, 4)}</p>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+      {/* ── Cast ── */}
+      {movie.cast && Array.isArray(movie.cast) && movie.cast.length > 0 && (
+        <div className="pt-8">
+          <div className="flex items-center gap-2 mb-4 px-5">
+            <div className="w-0.5 h-4 rounded-full bg-primary" />
+            <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 flex items-center gap-2">
+              <User className="w-3.5 h-3.5 text-primary" /> Cast
+            </h2>
           </div>
-        )}
-
-        {/* Back to all movies button */}
-        <div className="w-full max-w-sm mt-8 px-4">
-          <button
-            onClick={handleBack}
-            className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/50 text-sm font-bold hover:bg-white/10 active:scale-95 transition-all"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Back to All {movie.type === 'series' ? 'Series' : 'Movies'}
-          </button>
+          <div className="flex gap-3 overflow-x-auto pb-2 px-5" style={{ scrollbarWidth: "none" }}>
+            {(movie.cast as any[]).slice(0, 10).map((actor, idx) => (
+              <button
+                key={idx}
+                onClick={() => setLocation(`/app/browse?actor=${encodeURIComponent(actor.name)}&sort=rating`)}
+                className="flex-shrink-0 w-24 text-left active:scale-95 transition-transform"
+                data-testid={`cast-card-${idx}`}
+              >
+                <div className="w-24 h-32 rounded-2xl overflow-hidden mb-2 border border-white/8">
+                  {actor.profilePath ? (
+                    <img src={`https://image.tmdb.org/t/p/w185${actor.profilePath}`} alt={actor.name} className="w-full h-full object-cover object-top" />
+                  ) : (
+                    <div className="w-full h-full bg-white/5 flex items-center justify-center"><User className="w-8 h-8 text-white/20" /></div>
+                  )}
+                </div>
+                <div className="text-[9px] font-bold text-white/70 truncate">{actor.name}</div>
+                <div className="text-[8px] text-primary/60 truncate italic">{actor.character}</div>
+              </button>
+            ))}
+          </div>
         </div>
+      )}
+
+      {/* ── Recommended ── */}
+      {recommendedMovies.length > 0 && (
+        <div className="pt-8">
+          <div className="flex items-center justify-between px-5 mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-0.5 h-4 rounded-full bg-primary" />
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> You May Also Like
+              </span>
+            </div>
+            <button onClick={() => setLocation(`/app/browse?type=${movie.type}&sort=rating`)} className="flex items-center gap-1 text-[10px] text-primary font-bold active:scale-95 transition-all">
+              All <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-5 pb-2" style={{ scrollbarWidth: "none" }}>
+            {recommendedMovies.map((rec) => {
+              const recPoster = rec.posterPath
+                ? rec.posterPath.startsWith("http") ? rec.posterPath : `https://image.tmdb.org/t/p/w342${rec.posterPath}`
+                : null;
+              return (
+                <button key={rec.id} onClick={() => setLocation(`/app/movie/${rec.id}`)} className="flex-shrink-0 w-24 text-left" data-testid={`card-recommended-${rec.id}`}>
+                  <div className="relative w-24 h-36 rounded-xl overflow-hidden mb-1.5 border border-white/5">
+                    {recPoster ? (
+                      <img src={recPoster} alt={rec.title} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                        {rec.type === "series" ? <Tv className="w-6 h-6 text-white/20" /> : <Film className="w-6 h-6 text-white/20" />}
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                    {rec.rating && rec.rating > 0 && (
+                      <div className="absolute top-1 right-1 bg-black/70 rounded px-1 py-0.5 flex items-center gap-0.5">
+                        <Star className="w-2 h-2 text-yellow-400 fill-yellow-400" />
+                        <span className="text-[8px] font-bold text-white">{(rec.rating / 10).toFixed(1)}</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-white/70 font-semibold truncate">{rec.title}</p>
+                  {rec.releaseDate && <p className="text-[8px] text-white/30">{rec.releaseDate.slice(0, 4)}</p>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Back */}
+      <div className="px-5 pt-8">
+        <button
+          onClick={() => setLocation("/app")}
+          className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-white/40 text-sm font-bold active:scale-95 transition-all"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+          data-testid="button-back-bottom"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back to Home
+        </button>
       </div>
 
-      {showAd && (
-        <AdOverlay
-          ad={ad}
-          isLoading={isAdLoading}
-          onComplete={handleAdComplete}
-          smartLinkUrl={smartLinkUrl}
+      {/* ── Smart Link Ad Box ── */}
+      {adBox && (
+        <SmartLinkAdBox
+          smartLinkUrl={smartLinkConfig?.url || ""}
+          countdown={smartLinkConfig?.countdown ?? 5}
+          mode={adBox.mode}
+          onProceed={handleAdProceed}
+          onClose={() => setAdBox(null)}
         />
       )}
-
-      {showFullscreenAd && (
-        <FullScreenInterstitialAd
-          ad={fullscreenAd}
-          onClose={() => setShowFullscreenAd(false)}
-        />
-      )}
-
-      {/* Smart Link Overlay — AdOverlay style */}
-      {showSmartLink && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
-          {/* Background glows */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 blur-[120px] rounded-full animate-pulse" />
-            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: "700ms" }} />
-          </div>
-
-          <div className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col">
-
-            {/* Header */}
-            <div className="p-5 flex items-center justify-between border-b border-white/5 bg-white/5">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white leading-tight">Premium Content</h3>
-                  <p className="text-[10px] text-white/40 uppercase tracking-tighter">Sponsored Support</p>
-                </div>
-              </div>
-              {slCountdown > 0 ? (
-                <div className="bg-white/5 border border-white/10 px-4 py-2 rounded-2xl text-[11px] font-bold text-white/80 flex items-center gap-2">
-                  <Zap className="w-3.5 h-3.5 text-primary" />
-                  Wait {slCountdown}s
-                </div>
-              ) : (
-                <button
-                  onClick={doSmartLinkRedirect}
-                  className="rounded-2xl h-10 px-5 text-xs font-bold bg-green-500 hover:bg-green-600 text-white border-none shadow-lg"
-                  data-testid="button-skip-ad"
-                >
-                  Skip Ad →
-                </button>
-              )}
-            </div>
-
-            {/* Ad / Movie Poster area */}
-            <div className="relative flex-1 min-h-[260px] bg-black overflow-hidden flex items-center justify-center">
-              {movie?.posterPath ? (
-                <img
-                  src={movie.posterPath.startsWith("http") ? movie.posterPath : `https://image.tmdb.org/t/p/w500${movie.posterPath}`}
-                  alt={movie.title}
-                  className="w-full h-full object-cover opacity-60"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-purple-900/20">
-                  <Film className="w-20 h-20 text-white/10" />
-                </div>
-              )}
-              {/* Overlay gradient */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-              {/* Movie title badge */}
-              <div className="absolute bottom-4 left-4 right-4">
-                <p className="text-white font-bold text-lg leading-tight drop-shadow-lg line-clamp-2">{movie?.title}</p>
-                {movie?.releaseDate && (
-                  <p className="text-white/60 text-xs mt-0.5">{movie.releaseDate.slice(0, 4)}</p>
-                )}
-              </div>
-              {/* Progress bar on top */}
-              <div className="absolute top-0 left-0 right-0 h-1 bg-white/10">
-                <div
-                  className="h-full bg-primary transition-all duration-1000 linear"
-                  style={{ width: `${((smartLinkDuration - slCountdown) / smartLinkDuration) * 100}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-6 bg-[#181818] border-t border-white/5">
-              {/* Watch Ad to Support banner */}
-              <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20">
-                <div className="w-9 h-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                </div>
-                <div>
-                  <p className="text-white font-bold text-sm leading-tight">Watch Ad to Support</p>
-                  <p className="text-[10px] text-white/40 mt-0.5">Keeps this service free for everyone</p>
-                </div>
-                <div className="ml-auto shrink-0">
-                  <ShieldCheck className="w-5 h-5 text-primary/60" />
-                </div>
-              </div>
-              <button
-                onClick={doSmartLinkRedirect}
-                disabled={slCountdown > 0}
-                className={cn(
-                  "w-full py-4 rounded-2xl font-bold transition-all duration-500 text-sm flex items-center justify-center gap-2",
-                  slCountdown === 0
-                    ? "bg-primary hover:bg-primary/90 text-white shadow-[0_10px_30px_rgba(225,29,72,0.3)] scale-100"
-                    : "bg-white/5 text-white/20 border border-white/5 cursor-not-allowed scale-[0.98]"
-                )}
-                data-testid="button-unlock-movie"
-              >
-                {slCountdown > 0 ? (
-                  <>Ready in {slCountdown}s <Zap className="w-4 h-4 animate-pulse" /></>
-                ) : slMode === 'download' ? (
-                  <>Start Download <Download className="w-4 h-4" /></>
-                ) : (
-                  <>Unlock Movie Now <Download className="w-4 h-4" /></>
-                )}
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

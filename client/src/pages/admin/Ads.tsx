@@ -1,19 +1,200 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useAds, useCreateAd } from "@/hooks/use-ads";
-import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2, Calendar, Clock } from "lucide-react";
+import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2, Calendar, Clock, Link2, Timer, RefreshCw, Save, Rows3, ToggleLeft, ToggleRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAdSchema, type InsertAd } from "@shared/schema";
+import { insertAdSchema, type InsertAd, type Settings } from "@shared/schema";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation } from "@tanstack/react-query";
+
+function SmartLinkSettings() {
+  const { toast } = useToast();
+  const { data: settings, isLoading } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 30000 });
+  const [url, setUrl] = useState("");
+  const [countdown, setCountdown] = useState(5);
+  const [interval, setIntervalMin] = useState(0);
+
+  useEffect(() => {
+    if (settings) {
+      setUrl(settings.smartLinkUrl || "");
+      setCountdown(settings.smartLinkCountdown ?? 5);
+      setIntervalMin(settings.smartLinkInterval ?? 0);
+    }
+  }, [settings]);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings", {
+        smartLinkUrl: url,
+        smartLinkCountdown: countdown,
+        smartLinkInterval: interval,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/public/smart-link"] });
+      toast({ title: "Smart Link settings saved" });
+    },
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  if (isLoading) return null;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 mb-8">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <Link2 className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <h2 className="font-bold text-foreground">Smart Link Ad Settings</h2>
+          <p className="text-xs text-muted-foreground">Controls the mini ad box shown when users click Watch or Download</p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Link2 className="w-3.5 h-3.5 text-muted-foreground" /> Smart Link URL
+          </label>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://your-ad-network.com/link/..."
+            className="font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">This URL opens inside the mini ad box iframe when users click Watch or Download</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-5">
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-foreground flex items-center gap-2">
+              <Timer className="w-3.5 h-3.5 text-muted-foreground" /> Skip Countdown: <span className="text-primary font-bold">{countdown}s</span>
+            </label>
+            <Slider min={0} max={30} step={1} value={[countdown]} onValueChange={([v]) => setCountdown(v)} />
+            <p className="text-xs text-muted-foreground">Seconds before "Skip Ad" button appears (0 = always skippable)</p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-foreground flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" /> Show Interval: <span className="text-primary font-bold">{interval === 0 ? "Always" : `${interval}m`}</span>
+            </label>
+            <Slider min={0} max={60} step={1} value={[interval]} onValueChange={([v]) => setIntervalMin(v)} />
+            <p className="text-xs text-muted-foreground">Minutes between ad shows per user (0 = show every time)</p>
+          </div>
+        </div>
+
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="gap-2"
+        >
+          {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Smart Link Settings
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function BannerAdSettings() {
+  const { toast } = useToast();
+  const { data: settings, isLoading } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 30000 });
+  const [code, setBannerCode] = useState("");
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    if (settings) {
+      setBannerCode((settings as any).bannerAdCode || "");
+      setEnabled(settings.bannerAdEnabled ?? false);
+    }
+  }, [settings]);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings", {
+        bannerAdCode: code,
+        bannerAdEnabled: enabled,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/public/banner-ad"] });
+      toast({ title: "Banner Ad settings saved" });
+    },
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  if (isLoading) return null;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 mb-8">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <Rows3 className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <h2 className="font-bold text-foreground">Banner Ad Settings (320×50)</h2>
+          <p className="text-xs text-muted-foreground">Adsterra or any script-based 320×50 banner shown on all movie/series pages</p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
+          <div>
+            <div className="text-sm font-medium text-foreground">Enable Banner Ad</div>
+            <div className="text-xs text-muted-foreground">Show 320×50 banner on movie &amp; series pages</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEnabled(!enabled)}
+            className="transition-all active:scale-95"
+            data-testid="toggle-banner-enabled"
+          >
+            {enabled
+              ? <ToggleRight className="w-8 h-8 text-primary" />
+              : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+            }
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Code className="w-3.5 h-3.5 text-muted-foreground" /> Adsterra Banner Script
+          </label>
+          <Textarea
+            value={code}
+            onChange={(e) => setBannerCode(e.target.value)}
+            placeholder={`<script type='text/javascript'>\natOptions = {\n  'key' : 'YOUR_KEY',\n  'format' : 'iframe',\n  'height' : 50,\n  'width' : 320,\n  'params' : {}\n};\n</script>\n<script type='text/javascript' src='//www.topcreativeformat.com/YOUR_KEY/invoke.js'></script>`}
+            className="font-mono text-xs min-h-[130px] resize-none"
+            disabled={!enabled}
+          />
+          <p className="text-xs text-muted-foreground">Paste your full Adsterra script code here. It runs inside a sandboxed 320×50 iframe on movie/series pages.</p>
+        </div>
+
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="gap-2"
+        >
+          {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Banner Ad Settings
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function FileUploadField({
   label,
@@ -388,6 +569,9 @@ export default function AdminAds() {
             </DialogContent>
           </Dialog>
         </header>
+
+        <SmartLinkSettings />
+        <BannerAdSettings />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
            {isLoading ? <div>Loading ads...</div> : ads?.map((ad) => (

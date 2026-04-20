@@ -24,6 +24,7 @@ export const movies = pgTable("movies", {
   tmdbId: integer("tmdb_id"),
   cast: jsonb("cast"),
   views: integer("views").default(0),
+  downloads: integer("downloads").default(0),
   rating: integer("rating").default(0),
   genre: text("genre"),
   originalLanguage: text("original_language"),
@@ -150,6 +151,9 @@ export const settings = pgTable("settings", {
   smartLinkUrl: text("smart_link_url"),
   smartLinkCountdown: integer("smart_link_countdown").default(5),
   smartLinkInterval: integer("smart_link_interval").default(0),
+  bannerAdUrl: text("banner_ad_url"),
+  bannerAdEnabled: boolean("banner_ad_enabled").default(false),
+  bannerAdCode: text("banner_ad_code"),
 });
 
 // Mascot Settings

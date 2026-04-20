@@ -33,6 +33,7 @@ export interface IStorage {
   updateMovie(id: number, updates: Partial<InsertMovie>): Promise<Movie>;
   deleteMovie(id: number): Promise<void>;
   incrementMovieViews(id: number): Promise<void>;
+  incrementMovieDownloads(id: number): Promise<void>;
   markMoviePosted(id: number): Promise<void>;
 
   // Episodes
@@ -212,6 +213,10 @@ export class DatabaseStorage implements IStorage {
     await db.update(movies).set({ views: sql`${movies.views} + 1` }).where(eq(movies.id, id));
   }
 
+  async incrementMovieDownloads(id: number): Promise<void> {
+    await db.update(movies).set({ downloads: sql`${movies.downloads} + 1` }).where(eq(movies.id, id));
+  }
+
   async logDailyView(movieId?: number): Promise<void> {
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const existing = await db.select().from(viewLogs)
@@ -314,6 +319,10 @@ export class DatabaseStorage implements IStorage {
     await db.update(movies)
       .set({ views: sql`${movies.views} + 1` })
       .where(eq(movies.id, id));
+  }
+
+  async incrementMovieDownloads(id: number): Promise<void> {
+    await db.update(movies).set({ downloads: sql`${movies.downloads} + 1` }).where(eq(movies.id, id));
   }
 
   async getEpisodes(movieId: number, seasonNumber?: number): Promise<Episode[]> {

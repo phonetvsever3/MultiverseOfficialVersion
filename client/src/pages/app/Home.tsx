@@ -7,7 +7,6 @@ import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
 import { fullscreenAdShownFor } from "@/lib/ad-session";
-import SplashScreen from "@/components/SplashScreen";
 import { getWatchHistoryIds } from "@/lib/watch-history";
 
 const tg = (window as any).Telegram?.WebApp;
@@ -297,16 +296,6 @@ export default function Home() {
   const [showAd, setShowAd] = useState(false);
   const [pendingMovieId, setPendingMovieId] = useState<number | null>(null);
   const [fsAd, setFsAd] = useState<any>(null);
-  // Only show splash on the very first visit per session (not on back-navigation)
-  const [splash, setSplash] = useState(() => {
-    return !sessionStorage.getItem("splash_done");
-  });
-  const [splashResolved] = useState(true);
-
-  const handleSplashDone = () => {
-    sessionStorage.setItem("splash_done", "1");
-    setSplash(false);
-  };
 
   const { data: sections, isLoading } = useQuery<HomeSections>({
     queryKey: ["/api/home/sections"],
@@ -365,15 +354,6 @@ export default function Home() {
     ...(sections?.topMovies || []),
   ];
   const featuredItems = allMovies.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i).slice(0, 8);
-
-  // Wait for splash config to resolve before showing anything
-  if (!splashResolved) {
-    return <div className="fixed inset-0 bg-black z-[9999]" />;
-  }
-
-  if (splash) {
-    return <SplashScreen onDone={handleSplashDone} />;
-  }
 
   return (
     <div className="min-h-screen bg-black pb-safe">

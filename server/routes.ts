@@ -1846,6 +1846,17 @@ export async function registerRoutes(
     }
   });
 
+  // Increment movie downloads
+  app.post("/api/movies/:id/download", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.incrementMovieDownloads(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Increment movie views + log daily analytics
   app.post("/api/movies/:id/view", async (req, res) => {
     try {
@@ -3361,6 +3372,11 @@ export async function registerRoutes(
   app.get("/api/public/smart-link", async (_req, res) => {
     const s = await storage.getSettings();
     res.json({ url: s?.smartLinkUrl || "", countdown: s?.smartLinkCountdown ?? 5, interval: s?.smartLinkInterval ?? 0 });
+  });
+
+  app.get("/api/public/banner-ad", async (_req, res) => {
+    const s = await storage.getSettings();
+    res.json({ code: s?.bannerAdCode || "", enabled: s?.bannerAdEnabled ?? false });
   });
 
   return httpServer;
