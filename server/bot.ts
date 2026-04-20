@@ -43,6 +43,26 @@ const FALLBACK_KEYBOARD = {
   persistent: true,
 };
 
+// Helper: send a message with the main keyboard, falling back to FALLBACK_KEYBOARD in group chats
+async function sendWithKeyboard(
+  instance: TelegramBot,
+  chatId: number,
+  text: string,
+  opts: TelegramBot.SendMessageOptions,
+  mainKeyboard: any
+): Promise<void> {
+  try {
+    await instance.sendMessage(chatId, text, { ...opts, reply_markup: mainKeyboard });
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (msg.includes('web App buttons') || msg.includes('BUTTON_USER_PRIVACY_RESTRICTED') || msg.includes('group')) {
+      await instance.sendMessage(chatId, text, { ...opts, reply_markup: FALLBACK_KEYBOARD });
+    } else {
+      throw e;
+    }
+  }
+}
+
 export async function startBot() {
   // Bot polling ONLY starts if TELEGRAM_BOT_TOKEN env var is set.
   // This prevents double-replies when a second Replit shares the same database
@@ -227,34 +247,44 @@ export async function startBot() {
       overview,
     ].join('\n');
 
+    // Use regular URL buttons — these work in both private chats AND groups
     const buttonRow: any[] = [];
     if (webAppUrl) {
-      buttonRow.push({ text: "▶️ Watch / Stream", web_app: { url: webAppUrl } });
+      buttonRow.push({ text: "▶️ Watch / Stream", url: webAppUrl });
+      buttonRow.push({ text: "📥 Download", url: `https://t.me/${botUsername}?start=${movie.id}` });
     }
 
     const keyboard = buttonRow.length ? { inline_keyboard: [buttonRow] } : undefined;
 
-    try {
-      if (movie.posterPath) {
-        const posterUrl = `https://image.tmdb.org/t/p/w342${movie.posterPath}`;
+    if (movie.posterPath) {
+      const posterUrl = `https://image.tmdb.org/t/p/w342${movie.posterPath}`;
+      try {
         await botInstance?.sendPhoto(chatId, posterUrl, {
           caption,
           parse_mode: 'Markdown',
           reply_markup: keyboard,
         });
         return;
+      } catch (e: any) {
+        // poster failed (bad URL, network error), fall through to text message
       }
-    } catch (e) {}
+    }
 
-    await botInstance?.sendMessage(chatId, caption, {
-      parse_mode: 'Markdown',
-      reply_markup: keyboard,
-    });
+    try {
+      await botInstance?.sendMessage(chatId, caption, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+      });
+    } catch (e: any) {
+      // Last resort: send without any inline keyboard
+      await botInstance?.sendMessage(chatId, caption, { parse_mode: 'Markdown' });
+    }
   }
 
   async function sendMovieList(chatId: number, items: any[], title: string) {
     if (items.length === 0) {
-      await botInstance?.sendMessage(chatId, `❌ No results found.`, { reply_markup: await getMainKeyboard() });
+      const kb = await getMainKeyboard();
+      if (botInstance) await sendWithKeyboard(botInstance, chatId, `❌ No results found.`, {}, kb);
       return;
     }
     await botInstance?.sendMessage(chatId, `*${title}* — showing ${items.length} result(s):`, { parse_mode: 'Markdown' });
@@ -272,8 +302,9 @@ export async function startBot() {
     const movie = await storage.getMovie(id);
     if (movie && movie.fileId && movie.fileId !== 'placeholder_file_id') {
       const streamUrl = buildStreamWebAppUrl("movie", movie.id);
+      // Use regular URL button — works in both private chats and groups
       const inlineKeyboard = streamUrl
-        ? { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url: streamUrl } }]] }
+        ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: streamUrl }]] }
         : undefined;
       try {
         await botInstance?.sendVideo(chatId, movie.fileId, {
@@ -300,8 +331,9 @@ export async function startBot() {
       try {
         const parent = await storage.getMovie(episode.movieId);
         const streamUrl = buildStreamWebAppUrl("episode", episode.id);
+        // Use regular URL button — works in both private chats and groups
         const inlineKeyboard = streamUrl
-          ? { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url: streamUrl } }]] }
+          ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: streamUrl }]] }
           : undefined;
         await botInstance?.sendVideo(chatId, episode.fileId, {
           caption: `✅ *${parent?.title || 'Series'}*\nS${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}\n\nEnjoy! 📥`,
@@ -332,9 +364,9 @@ export async function startBot() {
     }
 
     // Nothing found at all
-    await botInstance?.sendMessage(chatId, `❌ Content with ID ${id} was not found.`, {
-      reply_markup: await getMainKeyboard(),
-    });
+    const kb = await getMainKeyboard();
+    if (botInstance) await sendWithKeyboard(botInstance, chatId,
+      `❌ Content with ID ${id} was not found.`, {}, kb);
   }
 
   async function trackUser(from: TelegramBot.User | undefined) {
@@ -367,7 +399,8 @@ export async function startBot() {
           if (movie) {
             await sendMovieCard(chatId, movie);
           } else {
-            await botInstance?.sendMessage(chatId, `❌ Content not found.`, { reply_markup: await getMainKeyboard() });
+            const kb = await getMainKeyboard();
+            if (botInstance) await sendWithKeyboard(botInstance, chatId, `❌ Content not found.`, {}, kb);
           }
           return;
         }
@@ -408,10 +441,13 @@ export async function startBot() {
     }
 
     const firstName = msg.from?.first_name || 'there';
-    await botInstance?.sendMessage(
+    const welcomeKb = await getMainKeyboard();
+    if (botInstance) await sendWithKeyboard(
+      botInstance,
       chatId,
       `🎬 *MULTIVERSE MOVIE BOT* 🌌\n\nWelcome to Multiverse Movie Bot 🚀\nYour ultimate destination for Movies, Series, and Live Sports — all in one place!\n\n✨ *Features:*\n• 🎥 Watch latest Movies & Series\n• ⚽ Live Sports Streaming\n• 🔎 Fast Search System\n• 🌐 Open App (Mini WebView Experience)\n• ⚡ Smooth & Fast Streaming\n• 🔄 Regular Updates\n\n🔥 *Why choose Multiverse?*\n• All content organized in one universe 🌌\n• Easy to use & mobile friendly\n• High-quality streaming experience\n\n📲 Just click 🌐 *Open App* and enjoy unlimited entertainment!\n\n🚀 Powered by Multiverse System`,
-      { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
+      { parse_mode: 'Markdown' },
+      welcomeKb
     );
   });
 
@@ -421,11 +457,10 @@ export async function startBot() {
     const query = match?.[1]?.trim() || "";
 
     if (!query) {
-      await botInstance?.sendMessage(
-        chatId,
+      const kb = await getMainKeyboard();
+      if (botInstance) await sendWithKeyboard(botInstance, chatId,
         "🔎 *Search*\n\nType a movie or series name, actor, or genre.\n\nExamples:\n`/search Oppenheimer`\n`/search Jason Statham`\n`/search Action 2024`",
-        { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
-      );
+        { parse_mode: 'Markdown' }, kb);
       return;
     }
 
@@ -433,21 +468,20 @@ export async function startBot() {
     if (items.length > 0) {
       await sendMovieList(chatId, items, `🔎 Results for "${query}"`);
     } else {
-      await botInstance?.sendMessage(chatId, `❌ No results for *"${query}"*. Try a different keyword.`, {
-        parse_mode: 'Markdown',
-        reply_markup: await getMainKeyboard(),
-      });
+      const kb = await getMainKeyboard();
+      if (botInstance) await sendWithKeyboard(botInstance, chatId,
+        `❌ No results for *"${query}"*. Try a different keyword.`,
+        { parse_mode: 'Markdown' }, kb);
     }
   });
 
   // ─── /movies → redirect to /search ────────────────────────────────────────
   botInstance.onText(/\/movies/, async (msg) => {
     const chatId = msg.chat.id;
-    await botInstance?.sendMessage(
-      chatId,
+    const kb = await getMainKeyboard();
+    if (botInstance) await sendWithKeyboard(botInstance, chatId,
       "🔎 *Search Movies & Series*\n\nType `/search <name>` or just type a movie name to find it!\n\nExamples:\n`/search Oppenheimer`\n`/search Action`",
-      { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
-    );
+      { parse_mode: 'Markdown' }, kb);
   });
 
   // ─── /series ───────────────────────────────────────────────────────────────
@@ -528,11 +562,10 @@ export async function startBot() {
       return;
     }
     if (text === "🔎 Search") {
-      await botInstance?.sendMessage(
-        chatId,
+      const kb = await getMainKeyboard();
+      if (botInstance) await sendWithKeyboard(botInstance, chatId,
         "🔎 *Search*\n\nJust type the movie or series name, actor, or genre and I'll find it!\n\nExamples:\n`Oppenheimer`\n`Action`\n`Jason Statham`",
-        { parse_mode: 'Markdown', reply_markup: await getMainKeyboard() }
-      );
+        { parse_mode: 'Markdown' }, kb);
       return;
     }
     if (text === "🆕 Latest") {
@@ -551,10 +584,10 @@ export async function startBot() {
         if (items.length > 0) {
           await sendMovieList(chatId, items, `🔎 Results for "${text}"`);
         } else if (text.length > 2) {
-          await botInstance?.sendMessage(chatId, `❌ No results for *"${text}"*. Try a different keyword.`, {
-            parse_mode: 'Markdown',
-            reply_markup: await getMainKeyboard(),
-          });
+          const kb = await getMainKeyboard();
+          if (botInstance) await sendWithKeyboard(botInstance, chatId,
+            `❌ No results for *"${text}"*. Try a different keyword.`,
+            { parse_mode: 'Markdown' }, kb);
         }
       }
     }
@@ -679,9 +712,10 @@ export async function broadcastMovieNotification(movie: any): Promise<{ sent: nu
     overview,
   ].join('\n');
 
+  // Use regular URL button — works in both private chats and groups
   const buttons: any[] = [];
   if (webAppUrl) {
-    buttons.push({ text: "▶️ Watch / Download", web_app: { url: webAppUrl } });
+    buttons.push({ text: "▶️ Watch / Download", url: webAppUrl });
   }
 
   let sent = 0;
@@ -739,9 +773,10 @@ export async function broadcastEpisodeNotification(episode: any, series: any): P
     ...(epOverview ? [``, epOverview] : []),
   ].join('\n');
 
+  // Use regular URL button — works in both private chats and groups
   const buttons: any[] = [];
   if (webAppUrl) {
-    buttons.push({ text: "▶️ Watch Series", web_app: { url: webAppUrl } });
+    buttons.push({ text: "▶️ Watch Series", url: webAppUrl });
   }
 
   let sent = 0;

@@ -266,9 +266,30 @@ export default function MovieView() {
         </div>
       )}
 
+      {/* ── 320x50 Banner Ad (above Watch Now) ── */}
+      {bannerAdConfig?.enabled && bannerAdConfig?.code && (
+        <div className="flex justify-center px-5 pt-4">
+          <div
+            className="overflow-hidden rounded-lg"
+            style={{ width: "320px", height: "50px", background: "transparent" }}
+            data-testid="banner-ad"
+          >
+            <iframe
+              srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;overflow:hidden}</style></head><body>${bannerAdConfig.code}</body></html>`}
+              width="320"
+              height="50"
+              className="border-0"
+              title="Advertisement"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox"
+              scrolling="no"
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Action Buttons for Movies ── */}
       {movie.type === "movie" && (
-        <div className="px-5 pt-5 flex flex-col gap-3">
+        <div className="px-5 pt-4 flex flex-col gap-3">
           <motion.button
             whileTap={{ scale: 0.97 }}
             data-testid="button-watch"
@@ -291,27 +312,6 @@ export default function MovieView() {
             <Download className="w-4.5 h-4.5" />
             Download
           </motion.button>
-        </div>
-      )}
-
-      {/* ── 320x50 Banner Ad ── */}
-      {bannerAdConfig?.enabled && bannerAdConfig?.code && (
-        <div className="flex justify-center px-5 pt-4">
-          <div
-            className="overflow-hidden rounded-lg"
-            style={{ width: "320px", height: "50px", background: "transparent" }}
-            data-testid="banner-ad"
-          >
-            <iframe
-              srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;overflow:hidden}</style></head><body>${bannerAdConfig.code}</body></html>`}
-              width="320"
-              height="50"
-              className="border-0"
-              title="Advertisement"
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox"
-              scrolling="no"
-            />
-          </div>
         </div>
       )}
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music, Ghost, Rocket, TrendingUp, CalendarDays, Lock } from "lucide-react";
+import { Search, Play, Star, Film, Tv, Flame, Eye, ChevronRight, Shield, Trophy, History, HeadphonesIcon, Crown, Zap, Wand2, Heart, Music, Ghost, Rocket, TrendingUp, CalendarDays, Lock, Clapperboard, Laugh, Sparkles } from "lucide-react";
 import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
@@ -29,6 +29,9 @@ interface HomeSections {
   todayTrending: Movie[];
   weeklyTrending: Movie[];
   adult: Movie[];
+  drama: Movie[];
+  comedy: Movie[];
+  romance: Movie[];
 }
 
 function getPoster(path: string | null | undefined, size = "w342") {
@@ -37,175 +40,125 @@ function getPoster(path: string | null | undefined, size = "w342") {
   return `${TMDB_IMAGE}${size}${path}`;
 }
 
-function MovieCard({ movie, onClick }: { movie: Movie; onClick: () => void }) {
-  const poster = getPoster(movie.posterPath);
+// ── Cinema Card: redesigned poster card for all genre/section rows ─────────
+function CinemaCard({ movie, onClick, rank }: { movie: Movie; onClick: () => void; rank?: number }) {
+  const poster = getPoster(movie.posterPath, "w500");
   return (
     <motion.div
-      whileTap={{ scale: 0.95 }}
+      whileTap={{ scale: 0.94 }}
       onClick={onClick}
-      className="flex-shrink-0 w-28 cursor-pointer"
+      className="flex-shrink-0 w-36 cursor-pointer"
+      data-testid={`card-movie-${movie.id}`}
     >
-      <div className="relative w-28 h-40 rounded-2xl overflow-hidden bg-white/5 border border-white/5 mb-2 shadow-xl">
+      <div className="relative w-36 h-52 rounded-2xl overflow-hidden mb-2 shadow-2xl"
+        style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
         {poster ? (
           <img src={poster} alt={movie.title} className="w-full h-full object-cover" loading="lazy" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
+          <div className="w-full h-full flex items-center justify-center bg-white/5">
             {movie.type === 'series' ? <AnimatedSeriesIcon /> : <AnimatedMovieIcon />}
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-        {movie.rating && movie.rating > 0 ? (
-          <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm rounded-lg px-1.5 py-0.5 flex items-center gap-1">
-            <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />
-            <span className="text-[9px] font-bold text-white">{(movie.rating / 10).toFixed(1)}</span>
+        {/* gradient layers */}
+        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, transparent 40%, rgba(0,0,0,0.85) 100%)" }} />
+
+        {/* rank badge */}
+        {rank !== undefined && (
+          <div className="absolute top-2 left-2 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black text-white"
+            style={{ background: "rgba(220,38,38,0.85)", backdropFilter: "blur(6px)" }}>
+            {rank}
           </div>
-        ) : null}
-        <div className="absolute bottom-2 left-2 right-2">
+        )}
+
+        {/* type badge */}
+        <div className="absolute top-2 right-2 flex items-center gap-1 rounded-md px-1.5 py-0.5"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}>
+          {movie.type === 'series'
+            ? <Tv className="w-2.5 h-2.5 text-purple-400" />
+            : <Film className="w-2.5 h-2.5 text-blue-400" />}
+          <span className="text-[8px] font-bold text-white/80">{movie.type === 'series' ? 'S' : 'M'}</span>
+        </div>
+
+        {/* rating + quality bottom row */}
+        <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 flex items-end justify-between">
           {movie.quality && (
-            <span className="text-[8px] bg-primary/80 text-white rounded px-1.5 py-0.5 font-bold uppercase">{movie.quality}</span>
+            <span className="text-[8px] font-black text-white px-1.5 py-0.5 rounded-md uppercase"
+              style={{ background: "rgba(220,38,38,0.8)" }}>
+              {movie.quality}
+            </span>
           )}
+          {movie.rating && movie.rating > 0 ? (
+            <div className="flex items-center gap-0.5 ml-auto rounded-md px-1.5 py-0.5"
+              style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
+              <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />
+              <span className="text-[9px] font-bold text-white">{(movie.rating / 10).toFixed(1)}</span>
+            </div>
+          ) : null}
         </div>
       </div>
-      <p className="text-[10px] text-white/70 font-semibold truncate px-0.5 leading-tight">{movie.title}</p>
+      <p className="text-[11px] text-white/80 font-semibold truncate px-0.5 leading-tight">{movie.title}</p>
       {movie.releaseDate && (
-        <p className="text-[9px] text-white/30 px-0.5">{movie.releaseDate.slice(0, 4)}</p>
+        <p className="text-[9px] text-white/30 px-0.5 mt-0.5">{movie.releaseDate.slice(0, 4)}</p>
       )}
     </motion.div>
   );
 }
 
-function Section({
+// ── Genre Section: clean header + cinema card row ─────────────────────────
+function GenreSection({
   title,
   icon,
+  accent,
   items,
   onMovieClick,
   onSeeMore,
+  showRank = false,
 }: {
   title: string;
   icon: React.ReactNode;
+  accent: string;
   items: Movie[];
   onMovieClick: (id: number) => void;
   onSeeMore?: () => void;
+  showRank?: boolean;
 }) {
   if (!items || items.length === 0) return null;
   return (
     <div className="mb-8">
+      {/* Section header */}
       <div className="flex items-center justify-between px-4 mb-3">
-        <div className="flex items-center gap-2">
-          {icon}
-          <h2 className="text-sm font-black text-white uppercase tracking-wider">{title}</h2>
-        </div>
-        {onSeeMore && (
-          <button
-            onClick={onSeeMore}
-            className="flex items-center gap-1 text-[10px] text-primary font-bold hover:text-primary/80 active:scale-95 transition-all"
-          >
-            See More <ChevronRight className="w-3 h-3" />
-          </button>
-        )}
-      </div>
-      <div className="flex gap-3 overflow-x-auto px-4 pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
-        {items.map((movie) => (
-          <MovieCard key={movie.id} movie={movie} onClick={() => onMovieClick(movie.id)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PremiumCard({ movie, onClick }: { movie: Movie; onClick: () => void }) {
-  const poster = getPoster(movie.posterPath, "w500");
-  return (
-    <motion.div
-      whileTap={{ scale: 0.96 }}
-      onClick={onClick}
-      className="flex-shrink-0 w-40 cursor-pointer"
-    >
-      <div className="relative w-40 h-56 rounded-2xl overflow-hidden bg-white/5 border border-white/10 mb-2 shadow-xl">
-        {poster ? (
-          <img src={poster} alt={movie.title} className="w-full h-full object-cover" loading="lazy" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            {movie.type === 'series' ? <AnimatedSeriesIcon /> : <AnimatedMovieIcon />}
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-        <div className="absolute top-2 left-2">
-          <div className="flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-lg px-1.5 py-0.5">
-            <Crown className="w-2.5 h-2.5 text-yellow-400" />
-            <span className="text-[8px] font-bold text-yellow-300 uppercase">{movie.type === 'series' ? 'Series' : 'Movie'}</span>
-          </div>
-        </div>
-        {movie.rating && movie.rating > 0 ? (
-          <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm rounded-lg px-1.5 py-0.5 flex items-center gap-1">
-            <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />
-            <span className="text-[9px] font-bold text-white">{(movie.rating / 10).toFixed(1)}</span>
-          </div>
-        ) : null}
-        <div className="absolute bottom-0 left-0 right-0 p-2.5">
-          {movie.quality && (
-            <span className="text-[8px] bg-primary/90 text-white rounded-md px-1.5 py-0.5 font-bold uppercase">{movie.quality}</span>
-          )}
-          <p className="text-[11px] text-white font-bold mt-1 leading-tight line-clamp-2">{movie.title}</p>
-          {movie.releaseDate && (
-            <p className="text-[9px] text-white/40 mt-0.5">{movie.releaseDate.slice(0, 4)}</p>
-          )}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function PremiumSection({
-  title,
-  icon,
-  badge,
-  items,
-  onMovieClick,
-  onSeeMore,
-  accentFrom,
-  accentTo,
-  borderColor,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  badge?: string;
-  items: Movie[];
-  onMovieClick: (id: number) => void;
-  onSeeMore?: () => void;
-  accentFrom: string;
-  accentTo: string;
-  borderColor: string;
-}) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div className="mb-8">
-      <div className={`mx-4 mb-3 rounded-2xl bg-gradient-to-r ${accentFrom} ${accentTo} border ${borderColor} px-4 py-3 flex items-center justify-between`}>
         <div className="flex items-center gap-2.5">
-          {icon}
-          <div>
-            <h2 className="text-sm font-black text-white uppercase tracking-wider leading-none">{title}</h2>
-            {badge && <p className="text-[9px] text-white/40 mt-0.5">{badge}</p>}
+          <div className={`w-1 h-5 rounded-full ${accent}`} />
+          <div className="flex items-center gap-2">
+            {icon}
+            <h2 className="text-[13px] font-black text-white uppercase tracking-wider">{title}</h2>
           </div>
         </div>
         {onSeeMore && (
           <button
             onClick={onSeeMore}
-            className="flex items-center gap-1 text-[10px] text-white/60 font-bold active:scale-95 transition-all"
+            className="flex items-center gap-1 text-[10px] text-white/40 font-bold active:scale-95 transition-all hover:text-white/70"
           >
-            All <ChevronRight className="w-3 h-3" />
+            See All <ChevronRight className="w-3 h-3" />
           </button>
         )}
       </div>
-      <div className="flex gap-3 overflow-x-auto px-4 pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
-        {items.map((movie) => (
-          <PremiumCard key={movie.id} movie={movie} onClick={() => onMovieClick(movie.id)} />
+      {/* Cards row */}
+      <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: 'none' }}>
+        {items.map((movie, idx) => (
+          <CinemaCard
+            key={movie.id}
+            movie={movie}
+            onClick={() => onMovieClick(movie.id)}
+            rank={showRank ? idx + 1 : undefined}
+          />
         ))}
       </div>
     </div>
   );
 }
 
+// ── Hero Slider ────────────────────────────────────────────────────────────
 function HeroSlider({ items, onMovieClick }: { items: Movie[]; onMovieClick: (id: number) => void }) {
   const [current, setCurrent] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -301,7 +254,6 @@ export default function Home() {
     queryKey: ["/api/home/sections"],
   });
 
-  // Watch history — read IDs from localStorage, fetch movie data
   const historyIds = getWatchHistoryIds();
   const { data: watchHistoryMovies = [] } = useQuery<Movie[]>({
     queryKey: ["/api/movies/by-ids", historyIds.join(",")],
@@ -310,7 +262,6 @@ export default function Home() {
       const res = await fetch(`/api/movies/by-ids?ids=${historyIds.join(",")}`);
       if (!res.ok) return [];
       const data: Movie[] = await res.json();
-      // preserve order from localStorage
       return historyIds.map(id => data.find(m => m.id === id)).filter(Boolean) as Movie[];
     },
     enabled: historyIds.length > 0,
@@ -390,67 +341,30 @@ export default function Home() {
             <HeroSlider items={featuredItems} onMovieClick={handleMovieClick} />
 
             {/* Today Trending */}
-            {(sections?.todayTrending?.length ?? 0) > 0 && (
-              <PremiumSection
-                title="Today Trending"
-                icon={<TrendingUp className="w-5 h-5 text-red-300" />}
-                badge="Most watched today"
-                accentFrom="from-red-950/60"
-                accentTo="to-rose-900/20"
-                borderColor="border-red-500/20"
-                items={sections?.todayTrending || []}
-                onMovieClick={handleMovieClick}
-              />
-            )}
-
-            {/* Weekly Trending */}
-            {(sections?.weeklyTrending?.length ?? 0) > 0 && (
-              <PremiumSection
-                title="Weekly Trending"
-                icon={<CalendarDays className="w-5 h-5 text-violet-300" />}
-                badge="Top picks this week"
-                accentFrom="from-violet-950/60"
-                accentTo="to-purple-900/20"
-                borderColor="border-violet-500/20"
-                items={sections?.weeklyTrending || []}
-                onMovieClick={handleMovieClick}
-              />
-            )}
-
-            {/* Latest Uploads */}
-            <PremiumSection
-              title="Latest Uploads"
-              icon={<Flame className="w-5 h-5 text-orange-300" />}
-              badge="Freshly added content"
-              accentFrom="from-orange-950/60"
-              accentTo="to-amber-900/20"
-              borderColor="border-orange-500/20"
-              items={sections?.latest || []}
+            <GenreSection
+              title="Today Trending"
+              icon={<TrendingUp className="w-4 h-4 text-red-400" />}
+              accent="bg-red-500"
+              items={sections?.todayTrending || []}
               onMovieClick={handleMovieClick}
-              onSeeMore={() => setLocation('/app/browse?sort=latest&title=Latest+Uploads')}
+              showRank
             />
 
             {/* New Movies */}
-            <PremiumSection
+            <GenreSection
               title="New Movies"
-              icon={<Film className="w-5 h-5 text-blue-300" />}
-              badge="Latest movie releases"
-              accentFrom="from-blue-950/60"
-              accentTo="to-blue-900/20"
-              borderColor="border-blue-500/20"
+              icon={<Film className="w-4 h-4 text-blue-400" />}
+              accent="bg-blue-500"
               items={sections?.newMovies || []}
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?type=movie&sort=latest&title=New+Movies')}
             />
 
             {/* New Series */}
-            <PremiumSection
+            <GenreSection
               title="New Series"
-              icon={<Tv className="w-5 h-5 text-purple-300" />}
-              badge="Latest series releases"
-              accentFrom="from-purple-950/60"
-              accentTo="to-purple-900/20"
-              borderColor="border-purple-500/20"
+              icon={<Tv className="w-4 h-4 text-purple-400" />}
+              accent="bg-purple-500"
               items={sections?.newSeries || []}
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?type=series&sort=latest&title=New+Series')}
@@ -458,73 +372,106 @@ export default function Home() {
 
             {/* Action */}
             {(sections?.action?.length ?? 0) > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="Action"
-                icon={<Zap className="w-5 h-5 text-orange-300" />}
-                badge="High-octane action hits"
-                accentFrom="from-orange-950/60"
-                accentTo="to-red-900/20"
-                borderColor="border-orange-500/20"
+                icon={<Zap className="w-4 h-4 text-orange-400" />}
+                accent="bg-orange-500"
                 items={sections?.action || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?search=action&sort=rating&title=Action')}
               />
             )}
 
-            {/* Animation */}
-            {(sections?.animation?.length ?? 0) > 0 && (
-              <PremiumSection
-                title="Animation"
-                icon={<Wand2 className="w-5 h-5 text-sky-300" />}
-                badge="Animated movies & series"
-                accentFrom="from-sky-950/60"
-                accentTo="to-cyan-900/20"
-                borderColor="border-sky-500/20"
-                items={sections?.animation || []}
-                onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?search=animation&sort=rating&title=Animation')}
-              />
-            )}
-
             {/* Horror */}
             {(sections?.horror?.length ?? 0) > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="Horror"
-                icon={<Ghost className="w-5 h-5 text-red-300" />}
-                badge="Spine-chilling horror picks"
-                accentFrom="from-red-950/60"
-                accentTo="to-slate-900/20"
-                borderColor="border-red-900/30"
+                icon={<Ghost className="w-4 h-4 text-red-400" />}
+                accent="bg-red-800"
                 items={sections?.horror || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?search=horror&sort=rating&title=Horror')}
               />
             )}
 
+            {/* Drama */}
+            {(sections?.drama?.length ?? 0) > 0 && (
+              <GenreSection
+                title="Drama"
+                icon={<Clapperboard className="w-4 h-4 text-amber-400" />}
+                accent="bg-amber-500"
+                items={sections?.drama || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=drama&sort=rating&title=Drama')}
+              />
+            )}
+
+            {/* Comedy */}
+            {(sections?.comedy?.length ?? 0) > 0 && (
+              <GenreSection
+                title="Comedy"
+                icon={<Laugh className="w-4 h-4 text-yellow-400" />}
+                accent="bg-yellow-500"
+                items={sections?.comedy || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=comedy&sort=rating&title=Comedy')}
+              />
+            )}
+
+            {/* Romance */}
+            {(sections?.romance?.length ?? 0) > 0 && (
+              <GenreSection
+                title="Romance"
+                icon={<Heart className="w-4 h-4 text-pink-400" />}
+                accent="bg-pink-500"
+                items={sections?.romance || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=romance&sort=rating&title=Romance')}
+              />
+            )}
+
             {/* Sci-Fi */}
             {(sections?.scifi?.length ?? 0) > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="Sci-Fi"
-                icon={<Rocket className="w-5 h-5 text-cyan-300" />}
-                badge="Futuristic science fiction"
-                accentFrom="from-cyan-950/60"
-                accentTo="to-blue-900/20"
-                borderColor="border-cyan-500/20"
+                icon={<Rocket className="w-4 h-4 text-cyan-400" />}
+                accent="bg-cyan-500"
                 items={sections?.scifi || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?search=sci-fi&sort=rating&title=Sci-Fi')}
               />
             )}
 
+            {/* 18+ Adult */}
+            {(sections?.adult?.length ?? 0) > 0 && (
+              <GenreSection
+                title="18+ Adult"
+                icon={<Lock className="w-4 h-4 text-rose-400" />}
+                accent="bg-rose-600"
+                items={sections?.adult || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?adult=1&title=18%2B+Adult')}
+              />
+            )}
+
+            {/* Animation */}
+            {(sections?.animation?.length ?? 0) > 0 && (
+              <GenreSection
+                title="Animation"
+                icon={<Wand2 className="w-4 h-4 text-sky-400" />}
+                accent="bg-sky-500"
+                items={sections?.animation || []}
+                onMovieClick={handleMovieClick}
+                onSeeMore={() => setLocation('/app/browse?search=animation&sort=rating&title=Animation')}
+              />
+            )}
+
             {/* K-Drama */}
             {(sections?.kdrama?.length ?? 0) > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="K-Drama"
-                icon={<Heart className="w-5 h-5 text-rose-300" />}
-                badge="Best Korean dramas"
-                accentFrom="from-rose-950/60"
-                accentTo="to-pink-900/20"
-                borderColor="border-rose-500/20"
+                icon={<Sparkles className="w-4 h-4 text-rose-300" />}
+                accent="bg-rose-400"
                 items={sections?.kdrama || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?lang=ko&sort=rating&title=K-Drama')}
@@ -533,68 +480,43 @@ export default function Home() {
 
             {/* Bollywood */}
             {(sections?.bollywood?.length ?? 0) > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="Bollywood"
-                icon={<Music className="w-5 h-5 text-amber-300" />}
-                badge="Top Bollywood hits"
-                accentFrom="from-amber-950/60"
-                accentTo="to-yellow-900/20"
-                borderColor="border-amber-500/20"
+                icon={<Music className="w-4 h-4 text-amber-400" />}
+                accent="bg-amber-500"
                 items={sections?.bollywood || []}
                 onMovieClick={handleMovieClick}
                 onSeeMore={() => setLocation('/app/browse?lang=hi&sort=rating&title=Bollywood')}
               />
             )}
 
-            {/* 18+ Adult */}
-            {(sections?.adult?.length ?? 0) > 0 && (
-              <PremiumSection
-                title="18+ Adult"
-                icon={<Lock className="w-5 h-5 text-red-400" />}
-                badge="Adults only · 18+ content"
-                accentFrom="from-red-950/70"
-                accentTo="to-rose-950/30"
-                borderColor="border-red-800/40"
-                items={sections?.adult || []}
-                onMovieClick={handleMovieClick}
-                onSeeMore={() => setLocation('/app/browse?adult=1&title=18%2B+Adult')}
-              />
-            )}
-
             {/* Top Movies */}
-            <PremiumSection
+            <GenreSection
               title="Top Movies"
-              icon={<Film className="w-5 h-5 text-blue-300" />}
-              badge="Highest rated movies"
-              accentFrom="from-blue-950/60"
-              accentTo="to-indigo-900/20"
-              borderColor="border-blue-500/20"
+              icon={<Crown className="w-4 h-4 text-yellow-400" />}
+              accent="bg-yellow-500"
               items={sections?.topMovies || []}
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?type=movie&sort=rating&title=Top+Movies')}
+              showRank
             />
 
             {/* Top Series */}
-            <PremiumSection
+            <GenreSection
               title="Top Series"
-              icon={<Tv className="w-5 h-5 text-purple-300" />}
-              badge="Highest rated series"
-              accentFrom="from-purple-950/60"
-              accentTo="to-violet-900/20"
-              borderColor="border-purple-500/20"
+              icon={<Crown className="w-4 h-4 text-violet-400" />}
+              accent="bg-violet-500"
               items={sections?.topSeries || []}
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?type=series&sort=rating&title=Top+Series')}
+              showRank
             />
 
             {/* Most Viewed */}
-            <PremiumSection
+            <GenreSection
               title="Most Viewed"
-              icon={<Eye className="w-5 h-5 text-green-300" />}
-              badge="Most popular right now"
-              accentFrom="from-green-950/60"
-              accentTo="to-emerald-900/20"
-              borderColor="border-green-500/20"
+              icon={<Eye className="w-4 h-4 text-green-400" />}
+              accent="bg-green-500"
               items={sections?.bestView || []}
               onMovieClick={handleMovieClick}
               onSeeMore={() => setLocation('/app/browse?sort=views&title=Most+Viewed')}
@@ -602,19 +524,16 @@ export default function Home() {
 
             {/* Continue Watching */}
             {watchHistoryMovies.length > 0 && (
-              <PremiumSection
+              <GenreSection
                 title="Continue Watching"
-                icon={<History className="w-5 h-5 text-cyan-300" />}
-                badge="Pick up where you left off"
-                accentFrom="from-cyan-950/60"
-                accentTo="to-teal-900/20"
-                borderColor="border-cyan-500/20"
+                icon={<History className="w-4 h-4 text-cyan-400" />}
+                accent="bg-cyan-500"
                 items={watchHistoryMovies}
                 onMovieClick={handleMovieClick}
               />
             )}
 
-            {/* Football Category */}
+            {/* Football Category — unchanged */}
             <div className="px-4 mb-4">
               <button
                 onClick={() => setLocation('/app/football')}
@@ -633,7 +552,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Adult Category */}
+            {/* Adult Category — unchanged */}
             <div className="px-4 mb-8">
               <button
                 onClick={() => setLocation('/app/adult')}
