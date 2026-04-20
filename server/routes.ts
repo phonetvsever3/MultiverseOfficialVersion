@@ -18,7 +18,7 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { generateAndSendTikTok, type MusicStyle } from "./tiktok-video";
-import { startBot, broadcastMovieNotification, broadcastEpisodeNotification } from "./bot";
+import { startBot, broadcastMovieNotification, broadcastEpisodeNotification, broadcastCustomMessage } from "./bot";
 import { seed } from "./seed";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
@@ -2710,6 +2710,29 @@ export async function registerRoutes(
       const series = await storage.getMovie(episode.movieId);
       if (!series) return res.status(404).json({ message: "Series not found" });
       const result = await broadcastEpisodeNotification(episode, series);
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ─── Custom Broadcast ────────────────────────────────────────────────────
+  app.post("/api/admin/broadcast", requireAdmin, memoryUpload.single("image"), async (req: Request, res: Response) => {
+    try {
+      const { text, buttonText, buttonUrl, imageUrl } = req.body;
+      if (!text || !text.trim()) {
+        return res.status(400).json({ message: "Message text is required" });
+      }
+      const imageBuffer = (req as any).file?.buffer as Buffer | undefined;
+      const imageName = (req as any).file?.originalname as string | undefined;
+      const result = await broadcastCustomMessage({
+        text: text.trim(),
+        imageUrl: imageUrl?.trim() || undefined,
+        imageBuffer,
+        imageName,
+        buttonText: buttonText?.trim() || undefined,
+        buttonUrl: buttonUrl?.trim() || undefined,
+      });
       res.json({ success: true, ...result });
     } catch (e: any) {
       res.status(500).json({ message: e.message });

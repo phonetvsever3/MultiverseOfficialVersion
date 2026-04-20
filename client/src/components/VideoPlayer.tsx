@@ -501,7 +501,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     setDownloading(true);
     const safeTitle = (title || src.label).replace(/[^a-z0-9_\-\s]/gi, "_");
     let url: string;
-    if (src.url.startsWith("/api/stream/telegram/")) {
+    if (src.url.startsWith("/api/stream/telegram/") || src.url.startsWith("/api/stream/movie/") || src.url.startsWith("/api/stream/episode/") || /^\/api\/stream\/(movie|episode)\/\d+$/.test(src.url)) {
       url = `${src.url}?download=1`;
     } else {
       url = `/api/proxy/download?url=${encodeURIComponent(src.url)}&type=${src.type}&title=${encodeURIComponent(title || src.label)}`;
@@ -780,18 +780,20 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
             <Lock className={`w-3.5 h-3.5 ${orientationLocked ? "text-amber-400" : "text-white/60"}`} />
           </button>
 
-          {/* Download */}
-          <button
-            onClick={handleDownload}
-            data-testid="player-download"
-            disabled={downloading}
-            className="flex items-center gap-1.5 px-3 py-2.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-white/80 text-[10px] font-black uppercase tracking-wider hover:bg-white/20 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {downloading
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <Download className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">{downloading ? "Starting…" : "Save"}</span>
-          </button>
+          {/* Download — hidden for m3u8/HLS sources */}
+          {sources[activeIndex]?.type !== "hls" && (
+            <button
+              onClick={handleDownload}
+              data-testid="player-download"
+              disabled={downloading}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-white/80 text-[10px] font-black uppercase tracking-wider hover:bg-white/20 active:scale-95 transition-all disabled:opacity-50"
+            >
+              {downloading
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Download className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{downloading ? "Starting…" : "Save"}</span>
+            </button>
+          )}
         </div>
 
         {/* BOTTOM CONTROLS */}

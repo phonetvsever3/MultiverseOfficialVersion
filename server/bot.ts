@@ -776,3 +776,83 @@ export async function broadcastEpisodeNotification(episode: any, series: any): P
 
   return { sent, failed };
 }
+
+export interface BroadcastOptions {
+  text: string;
+  imageUrl?: string;
+  imageBuffer?: Buffer;
+  imageName?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+}
+
+export async function broadcastCustomMessage(options: BroadcastOptions): Promise<{ sent: number; failed: number }> {
+  const instance = botInstance;
+  if (!instance) return { sent: 0, failed: 0 };
+
+  const allUsers = await storage.getUsers();
+  if (allUsers.length === 0) return { sent: 0, failed: 0 };
+
+  const { text, imageUrl, imageBuffer, imageName, buttonText, buttonUrl } = options;
+
+  const buttons: any[] = [];
+  if (buttonText && buttonUrl) {
+    buttons.push({ text: buttonText, url: buttonUrl });
+  }
+
+  const markup = buttons.length ? { inline_keyboard: [buttons] } : undefined;
+
+  let sent = 0;
+  let failed = 0;
+  let cachedFileId: string | null = null;
+
+  for (const user of allUsers) {
+    try {
+      const chatId = parseInt(user.telegramId);
+      if (isNaN(chatId)) { failed++; continue; }
+
+      const hasImage = imageUrl || imageBuffer;
+      if (hasImage) {
+        try {
+          let photoSource: any;
+          if (cachedFileId) {
+            photoSource = cachedFileId;
+          } else if (imageBuffer) {
+            photoSource = imageBuffer;
+          } else {
+            photoSource = imageUrl!;
+          }
+
+          const result = await instance.sendPhoto(chatId, photoSource, {
+            caption: text,
+            parse_mode: "Markdown",
+            reply_markup: markup,
+          });
+
+          if (!cachedFileId) {
+            const photos = (result as any)?.photo;
+            if (Array.isArray(photos) && photos.length > 0) {
+              cachedFileId = photos[photos.length - 1]?.file_id || null;
+            }
+          }
+
+          sent++;
+          await new Promise(r => setTimeout(r, 50));
+          continue;
+        } catch {}
+      }
+
+      await instance.sendMessage(chatId, text, {
+        parse_mode: "Markdown",
+        reply_markup: markup,
+        disable_web_page_preview: false,
+      } as any);
+      sent++;
+    } catch {
+      failed++;
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  return { sent, failed };
+}

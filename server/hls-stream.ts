@@ -458,12 +458,17 @@ export function registerHlsRoutes(app: Express) {
       }
 
       const chunkSize = end - start + 1;
+      const isDownload = req.query.download === "1";
 
       res.setHeader("Content-Type", "video/mp4");
       res.setHeader("Content-Length", chunkSize);
       res.setHeader("Content-Range", `bytes ${start}-${end}/${totalSize}`);
       res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Cache-Control", "public, max-age=3600");
+      if (isDownload) {
+        const safeTitle = ((type === "movie" ? "movie" : "episode") + "_" + numId).replace(/[^a-z0-9_\-]/gi, "_");
+        res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp4"`);
+      }
       res.status(206);
 
       // ── MTProto path ────────────────────────────────────────────────────

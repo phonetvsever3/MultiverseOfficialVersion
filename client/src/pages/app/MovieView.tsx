@@ -125,6 +125,7 @@ export default function MovieView() {
 
   const [showSmartLink, setShowSmartLink] = useState(false);
   const [slCountdown, setSlCountdown] = useState(smartLinkDuration);
+  const [slMode, setSlMode] = useState<'watch' | 'download'>('watch');
   const slTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slRedirectedRef = useRef(false);
   const slFallbackRef = useRef<(() => void) | null>(null);
@@ -132,18 +133,16 @@ export default function MovieView() {
   const openSmartLinkUrl = useCallback((url: string) => {
     try {
       if (tg?.openLink) {
-        tg.openLink(url);
+        // try_instant_view: false forces the device browser instead of Telegram instant view
+        tg.openLink(url, { try_instant_view: false } as any);
       } else {
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
-        if (!win) {
-          const a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       }
     } catch (e) {
       console.error('[SmartLink] open failed', e);
@@ -165,7 +164,7 @@ export default function MovieView() {
     }, 300);
   }, [smartLinkUrl, openSmartLinkUrl]);
 
-  const startSmartLink = useCallback((fallback?: () => void) => {
+  const startSmartLink = useCallback((fallback?: () => void, mode: 'watch' | 'download' = 'watch') => {
     // Check interval: if enough time hasn't passed, skip the ad
     if (smartLinkInterval > 0) {
       try {
@@ -183,6 +182,7 @@ export default function MovieView() {
     slFallbackRef.current = fallback || null;
     const duration = smartLinkDuration > 0 ? smartLinkDuration : 5;
     setSlCountdown(duration);
+    setSlMode(mode);
     slRedirectedRef.current = false;
     setShowSmartLink(true);
     if (slTimerRef.current) clearInterval(slTimerRef.current);
@@ -443,7 +443,37 @@ export default function MovieView() {
                  <Play className="w-7 h-7 fill-white" /> Watch Now
                </Button>
                <button
-                 onClick={() => startSmartLink(() => mainButtonHandlerRef.current())}
+                 onClick={() => startSmartLink(() => {
+                   // Determine source: streamUrl = direct download, fileId only = Telegram bot
+                   const hasStreamUrl = selectedEpisode
+                     ? !!selectedEpisode.streamUrl
+                     : !!movie?.streamUrl;
+
+                   if (hasStreamUrl) {
+                     // Direct HTTP download via stream endpoint
+                     const resourceId = selectedEpisode ? selectedEpisode.id : movieId;
+                     const resourceType = selectedEpisode ? 'episode' : 'movie';
+                     const safeTitle = (movie?.title || 'download').replace(/[^a-z0-9_\-\s]/gi, '_');
+                     const url = `/api/stream/${resourceType}/${resourceId}?download=1`;
+                     const a = document.createElement('a');
+                     a.href = url;
+                     a.download = `${safeTitle}.mp4`;
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                   } else {
+                     // fileId-only: ask the Telegram bot to send the file to the user's chat
+                     const idToSend = selectedEpisode ? `ep_${selectedEpisode.id}` : movieId;
+                     const botUsername = "MultiverseMovies_Bot";
+                     const deepLink = `https://t.me/${botUsername}?start=${idToSend}`;
+                     if (tg) {
+                       try { tg.sendData(String(selectedEpisode ? selectedEpisode.id : movieId)); } catch (_) {}
+                       tg.openTelegramLink(deepLink);
+                     } else {
+                       window.open(deepLink, '_blank');
+                     }
+                   }
+                 }, 'download')}
                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:bg-white/10 active:scale-95 transition-all"
                  data-testid="button-get-on-bot"
                >
@@ -821,6 +851,8 @@ export default function MovieView() {
               >
                 {slCountdown > 0 ? (
                   <>Ready in {slCountdown}s <Zap className="w-4 h-4 animate-pulse" /></>
+                ) : slMode === 'download' ? (
+                  <>Start Download <Download className="w-4 h-4" /></>
                 ) : (
                   <>Unlock Movie Now <Download className="w-4 h-4" /></>
                 )}

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity, Video } from "lucide-react";
+import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity, Video, Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -11,6 +11,7 @@ const navigation = [
   { name: 'URL Manager', href: '/admin/app-urls', icon: Link2 },
   { name: 'Stream LB', href: '/admin/stream-backends', icon: GitFork },
   { name: 'Users', href: '/admin/users', icon: Users },
+  { name: 'Broadcast', href: '/admin/broadcast', icon: Megaphone },
   { name: 'Movies Library', href: '/admin/movies', icon: Film },
   { name: 'Channels', href: '/admin/channels', icon: Tv },
   { name: 'Ad Manager', href: '/admin/ads', icon: MonitorPlay },
