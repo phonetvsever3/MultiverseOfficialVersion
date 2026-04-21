@@ -28,6 +28,64 @@ import {
 const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MB per segment
 
 // --------------------------------------------------------------------------
+// Synced-file fallback — find a Telegram file in syncedFiles that matches a
+// movie/episode whose own fileId is empty (e.g. TMDB-auto-created episodes).
+// --------------------------------------------------------------------------
+
+function tokenizeTitle(title: string): string[] {
+  return (title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length >= 3);
+}
+
+async function findSyncedFileForMovie(movie: any): Promise<any | null> {
+  if (!movie?.title) return null;
+  const tokens = tokenizeTitle(movie.title);
+  if (tokens.length === 0) return null;
+  const { items } = await storage.getSyncedFiles({ search: tokens[0], limit: 200 });
+  // Pick a file whose name contains all tokens of the movie title.
+  for (const f of items) {
+    const name = (f.fileName || "").toLowerCase();
+    if (tokens.every(t => name.includes(t))) {
+      // Skip files that look like episodes
+      if (/s\d{1,2}\s*e\d{1,2}/i.test(name)) continue;
+      return f;
+    }
+  }
+  return null;
+}
+
+async function findSyncedFileForEpisode(episode: any): Promise<any | null> {
+  if (!episode) return null;
+  const parent = await storage.getMovie(episode.movieId);
+  if (!parent?.title) return null;
+
+  const sn = String(episode.seasonNumber || 1).padStart(2, "0");
+  const en = String(episode.episodeNumber || 1).padStart(2, "0");
+  const sePattern = new RegExp(`s0?${Number(sn)}\\s*[\\.\\-_ ]?\\s*e0?${Number(en)}\\b`, "i");
+
+  const tokens = tokenizeTitle(parent.title);
+  // Try searching by the first significant title token, then verify the SE pattern.
+  const searchTerm = tokens[0] || `S${sn}E${en}`;
+  const { items } = await storage.getSyncedFiles({ search: searchTerm, limit: 200 });
+  for (const f of items) {
+    const name = (f.fileName || "");
+    if (!sePattern.test(name)) continue;
+    if (tokens.length === 0 || tokens.every(t => name.toLowerCase().includes(t))) {
+      return f;
+    }
+  }
+  // Fallback: search by the SE pattern alone.
+  const { items: items2 } = await storage.getSyncedFiles({ search: `S${sn}E${en}`, limit: 200 });
+  for (const f of items2) {
+    if (sePattern.test(f.fileName || "")) return f;
+  }
+  return null;
+}
+
+// --------------------------------------------------------------------------
 // Source resolution
 // --------------------------------------------------------------------------
 
@@ -237,8 +295,18 @@ async function getMtprotoCreds(): Promise<MtprotoCredentials | null> {
 
 export function registerHlsRoutes(app: Express) {
 
-  // ── Playlist ──────────────────────────────────────────────────────────────
-  app.get("/api/hls/:type/:id/playlist.m3u8", async (req: Request, res: Response) => {
+  // HLS routes disabled — the chunked-MP4-as-TS approach can't be demuxed
+  // by HLS players, which produces "Couldn't load this source" errors.
+  // Kept as 410 Gone so any cached client gracefully falls back to MP4.
+  app.get("/api/hls/:type/:id/playlist.m3u8", (_req: Request, res: Response) => {
+    res.status(410).json({ message: "HLS streaming is disabled. Use /api/stream/:type/:id." });
+  });
+  app.get("/api/hls/:type/:id/chunk/:index.ts", (_req: Request, res: Response) => {
+    res.status(410).end();
+  });
+
+  // ── Playlist (legacy, unreachable) ────────────────────────────────────────
+  app.get("/__disabled__/api/hls/:type/:id/playlist.m3u8", async (req: Request, res: Response) => {
     const { type, id } = req.params;
     const numId = parseInt(id, 10);
     if (!["movie", "episode"].includes(type) || isNaN(numId)) {
@@ -437,18 +505,36 @@ export function registerHlsRoutes(app: Express) {
 
       if (type === "movie") {
         const movie = await storage.getMovie(numId);
-        if (!movie || !movie.fileId) return res.status(404).json({ message: "Movie not found" });
+        if (!movie) return res.status(404).json({ message: "Movie not found" });
         fileId = movie.fileId;
         fileSize = movie.fileSize ?? null;
         streamUrl = movie.streamUrl ?? null;
         fileUniqueId = movie.fileUniqueId ?? null;
+        if (!fileId) {
+          const matched = await findSyncedFileForMovie(movie);
+          if (matched) {
+            fileId = matched.fileId;
+            fileSize = matched.fileSize ?? fileSize;
+            fileUniqueId = matched.fileUniqueId ?? fileUniqueId;
+          }
+        }
+        if (!fileId) return res.status(404).json({ message: "No file attached to this title yet." });
       } else {
         const episode = await storage.getEpisode(numId);
-        if (!episode || !episode.fileId) return res.status(404).json({ message: "Episode not found" });
+        if (!episode) return res.status(404).json({ message: "Episode not found" });
         fileId = episode.fileId;
         fileSize = episode.fileSize ?? null;
         streamUrl = episode.streamUrl ?? null;
         fileUniqueId = episode.fileUniqueId ?? null;
+        if (!fileId) {
+          const matched = await findSyncedFileForEpisode(episode);
+          if (matched) {
+            fileId = matched.fileId;
+            fileSize = matched.fileSize ?? fileSize;
+            fileUniqueId = matched.fileUniqueId ?? fileUniqueId;
+          }
+        }
+        if (!fileId) return res.status(404).json({ message: "No file attached to this episode yet." });
       }
 
       const mtprotoCreds = await getMtprotoCreds();
