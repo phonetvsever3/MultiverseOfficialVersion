@@ -289,16 +289,6 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     player.on("ended",    () => { setPlaying(false); setControlsVisible(true); });
     player.on("error",    () => { setError(true); setLoading(false); });
 
-    const loadTimeout = setTimeout(() => {
-      if (playerRef.current && !playerRef.current.isDisposed()) {
-        const readyState = (playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null)?.readyState ?? 0;
-        if (readyState < 2) {
-          setError(true);
-          setLoading(false);
-        }
-      }
-    }, 60000);
-
     player.on("timeupdate", () => {
       const ct = player.currentTime() ?? 0;
       setCurrentTime(ct);
@@ -322,7 +312,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       internalEl.addEventListener("leavepictureinpicture", () => setIsPip(false));
     }
 
-    setLoading(true);
+    setLoading(false);
     setError(false);
     setPlaying(false);
     setCurrentTime(0);
@@ -330,15 +320,56 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
     playerRef.current = player;
 
+    // Attempt autoplay; if browser blocks it, stay in paused state so user sees the play button
+    player.ready(() => {
+      const playPromise = (player as any).play() as Promise<void> | undefined;
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {
+          setLoading(false);
+          setPlaying(false);
+        });
+      }
+    });
+
+    // Network-activity-based stuck detector.
+    // Files with moov atom at end (not fast-start) require the browser to seek
+    // to the very end (e.g. 387 MB) before playing. Each MTProto range request
+    // takes 3-200 seconds. As long as the browser is still downloading (the
+    // native video 'progress' event fires), we wait. Only error after 60 s of
+    // total silence (no data received and not playing).
+    let lastProgressTime = Date.now();
+    const stuckChecker = setInterval(() => {
+      if (!playerRef.current || playerRef.current.isDisposed()) {
+        clearInterval(stuckChecker);
+        return;
+      }
+      if (playingRef.current) {
+        clearInterval(stuckChecker);
+        return;
+      }
+      if (Date.now() - lastProgressTime > 60000) {
+        const readyState = (playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null)?.readyState ?? 0;
+        if (readyState < 2) {
+          setError(true);
+          setLoading(false);
+        }
+        clearInterval(stuckChecker);
+      }
+    }, 5000);
+
+    if (internalEl) {
+      internalEl.addEventListener("progress", () => { lastProgressTime = Date.now(); });
+    }
+
     if (showPrerollRef.current && !prerollShown.current) {
       prerollShown.current = true;
       player.one("canplay", () => {
-        clearTimeout(loadTimeout);
+        clearInterval(stuckChecker);
         triggerPrerollAd();
       });
     }
-    player.one("play",  () => clearTimeout(loadTimeout));
-    player.one("error", () => clearTimeout(loadTimeout));
+    player.one("play",  () => clearInterval(stuckChecker));
+    player.one("error", () => clearInterval(stuckChecker));
   }, [sources, poster, resetHide, triggerMidrollAd, triggerPrerollAd]);
 
   useEffect(() => {
@@ -540,9 +571,17 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       {/* VIDEO.JS */}
       <div ref={containerRef} className="absolute inset-0 [&_.video-js]:w-full [&_.video-js]:h-full [&_.video-js]:bg-black" />
 
-      {/* LOADING */}
+      {/* LOADING — show poster as background while buffering so screen isn't blank */}
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          {poster && (
+            <img
+              src={poster}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover opacity-20"
+              draggable={false}
+            />
+          )}
           <div className="relative w-16 h-16">
             <div className="absolute inset-0 rounded-full border-[3px] border-white/8" />
             <div className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-red-500 animate-spin" />

@@ -3,7 +3,7 @@ import { Api } from 'telegram';
 import bigInt from 'big-integer';
 import { storage } from './storage';
 import { translateToMyanmar } from './translate';
-import { getTgClient } from './tg-stream';
+import { getTgClient, parseTelegramFileId } from './tg-stream';
 
 // Forward a message from the bin channel to a user chat using MTProto.
 // This bypasses Bot API file_id limitations (e.g. "wrong remote file identifier
@@ -37,6 +37,49 @@ async function forwardFromBinViaMtproto(
     return true;
   } catch (e: any) {
     console.error(`[Bot] MTProto forward failed (chat=${chatId}, ch=${channelId}, msg=${messageId}):`, e?.message || e);
+    return false;
+  }
+}
+
+// Send a Telegram document directly to a user via MTProto using just the
+// raw fileId (parsed into its document location). This works even when the
+// Bot API rejects the fileId as "wrong remote file identifier" because we
+// bypass Bot API format validation entirely and use the document_id +
+// access_hash + file_reference from the fileId binary structure.
+async function sendDocumentViaMtproto(
+  chatId: number,
+  fileId: string,
+  caption: string
+): Promise<boolean> {
+  try {
+    const settings = await storage.getSettings();
+    const apiId = settings?.fsbApiId;
+    const apiHash = settings?.fsbApiHash;
+    const botToken = settings?.fsbBotToken || settings?.botToken;
+    if (!apiId || !apiHash || !botToken) return false;
+
+    const { documentId, accessHash, fileReference } = parseTelegramFileId(fileId);
+    const client = await getTgClient(apiId, apiHash, botToken);
+    const toPeer = await client.getInputEntity(bigInt(chatId) as any);
+
+    await client.invoke(
+      new Api.messages.SendMedia({
+        peer: toPeer,
+        media: new Api.InputMediaDocument({
+          id: new Api.InputDocument({
+            id: documentId,
+            accessHash,
+            fileReference,
+          }),
+        }),
+        message: caption,
+        randomId: bigInt.randBetween('1', '9223372036854775807'),
+      })
+    );
+    console.log(`[Bot] MTProto direct send succeeded for chat=${chatId}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[Bot] MTProto direct send failed (chat=${chatId}):`, e?.message || e);
     return false;
   }
 }
@@ -365,6 +408,100 @@ export async function startBot() {
     return `https://${domain}/app/stream/${type}/${id}`;
   }
 
+  // ── Episode-specific delivery (skips movie lookup entirely) ─────────────────
+  async function handleEpisodeDownload(chatId: number, epId: number) {
+    console.log(`[Bot] Episode delivery request — Episode ID: ${epId}, Chat: ${chatId}`);
+
+    function makeKeyboard(url: string) {
+      return {
+        webApp: { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url } }]] },
+        urlFallback: { inline_keyboard: [[{ text: "▶️ Watch in App", url }]] },
+      };
+    }
+
+    async function trySendFile(fileId: string, caption: string): Promise<'ok' | 'invalid' | 'fail'> {
+      for (const send of ['video', 'document'] as const) {
+        try {
+          if (send === 'video') {
+            await botInstance?.sendVideo(chatId, fileId, { caption, parse_mode: 'Markdown' });
+          } else {
+            await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
+          }
+          return 'ok';
+        } catch (e: any) {
+          const msg = e?.message || String(e);
+          console.error(`[Bot] send${send === 'video' ? 'Video' : 'Document'} failed:`, msg);
+          if (msg.includes('wrong remote file identifier') || msg.includes('WRONG_FILE_ID')) {
+            return 'invalid';
+          }
+        }
+      }
+      return 'fail';
+    }
+
+    const episode = await storage.getEpisode(epId);
+    if (!episode) {
+      const kb = await getMainKeyboard();
+      if (botInstance) await sendWithKeyboard(botInstance, chatId, `❌ Episode not found.`, {}, kb);
+      return;
+    }
+
+    const parent = await storage.getMovie(episode.movieId);
+    const s = String(episode.seasonNumber ?? 1).padStart(2, '0');
+    const e = String(episode.episodeNumber ?? 1).padStart(2, '0');
+    const caption = `✅ *${parent?.title || 'Series'}*\nS${s}E${e}${episode.title ? `: ${episode.title}` : ''}\n\nEnjoy! 🎬`;
+    const streamUrl = buildStreamWebAppUrl("episode", episode.id);
+
+    // 1. Try stored episode fileId directly
+    if (episode.fileId) {
+      const result = await trySendFile(episode.fileId, caption);
+      if (result === 'ok') return;
+    }
+
+    // 2. Try fileUniqueId lookup in syncedFiles
+    if (episode.fileUniqueId) {
+      try {
+        const sf = await storage.getSyncedFileByUniqueId(episode.fileUniqueId);
+        if (sf?.fileId) {
+          const result2 = await trySendFile(sf.fileId, caption);
+          if (result2 === 'ok') {
+            try { await storage.updateEpisode(episode.id, { fileId: sf.fileId }); } catch {}
+            return;
+          }
+        }
+        // 3. Forward original message via MTProto (needs channelId + messageId from syncedFiles)
+        if (sf?.channelId && sf?.messageId) {
+          console.log(`[Bot] Forwarding episode ${episode.id} via MTProto from ch=${sf.channelId} msg=${sf.messageId}`);
+          const ok = await forwardFromBinViaMtproto(chatId, sf.channelId, sf.messageId);
+          if (ok) return;
+        }
+      } catch {}
+    }
+
+    // 4. MTProto direct send using parsed document location from stored fileId.
+    //    Works even when Bot API rejects the fileId as "wrong remote file identifier"
+    //    because we bypass Bot API and use the raw document_id + access_hash directly.
+    if (episode.fileId) {
+      try {
+        console.log(`[Bot] Trying MTProto direct send for episode ${episode.id} chat=${chatId}`);
+        const ok = await sendDocumentViaMtproto(chatId, episode.fileId, caption);
+        if (ok) return;
+      } catch {}
+    }
+
+    // Not deliverable — show watch-in-app fallback
+    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+    const watchUrl = domain && parent ? `https://${domain}/app/movie/${parent.id}` : streamUrl;
+    const msg = `⚠️ *${parent?.title || 'Series'}* S${s}E${e}\n\nဤ ဇာတ်ကဗျာဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
+    if (watchUrl) {
+      const kbs = makeKeyboard(watchUrl);
+      try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
+      catch { try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
+    } else {
+      await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+    }
+  }
+
   async function handleMovieDownload(chatId: number, id: number) {
     console.log(`[Bot] Delivery request — ID: ${id}, Chat: ${chatId}`);
 
@@ -473,25 +610,55 @@ export async function startBot() {
     }
 
     const episode = await storage.getEpisode(id);
-    if (episode?.fileId) {
+    if (episode) {
       try {
         const parent = await storage.getMovie(episode.movieId);
         const streamUrl = buildStreamWebAppUrl("episode", episode.id);
-        const caption = `✅ *${parent?.title || 'Series'}*\nS${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}\n\nEnjoy! 🎬`;
-        const result = await trySendFile(episode.fileId, caption);
-        if (result === 'ok') {
-          await sendWatchButton(streamUrl);
-          return;
+        const s = String(episode.seasonNumber ?? 1).padStart(2, '0');
+        const e = String(episode.episodeNumber ?? 1).padStart(2, '0');
+        const caption = `✅ *${parent?.title || 'Series'}*\nS${s}E${e}${episode.title ? `: ${episode.title}` : ''}\n\nEnjoy! 🎬`;
+
+        // 1. Try stored episode fileId directly
+        if (episode.fileId) {
+          const result = await trySendFile(episode.fileId, caption);
+          if (result === 'ok') {
+            await sendWatchButton(streamUrl);
+            return;
+          }
         }
-        // Episode fileId rejected — try MTProto forward via syncedFiles
-        if (result === 'invalid' && episode.fileUniqueId) {
+
+        // 2. Try lookup via fileUniqueId in syncedFiles
+        if (episode.fileUniqueId) {
           const sf = await storage.getSyncedFileByUniqueId(episode.fileUniqueId);
-          if (sf?.channelId && sf?.messageId) {
-            console.log(`[Bot] Forwarding episode ${episode.id} via MTProto from ch=${sf.channelId} msg=${sf.messageId}`);
-            const ok = await forwardFromBinViaMtproto(chatId, sf.channelId, sf.messageId);
+          if (sf?.fileId) {
+            const result2 = await trySendFile(sf.fileId, caption);
+            if (result2 === 'ok') {
+              try { await storage.updateEpisode(episode.id, { fileId: sf.fileId }); } catch {}
+              await sendWatchButton(streamUrl);
+              return;
+            }
+          }
+          // 3. Forward the original message via MTProto
+          const sfForward = await storage.getSyncedFileByUniqueId(episode.fileUniqueId).catch(() => null);
+          if (sfForward?.channelId && sfForward?.messageId) {
+            console.log(`[Bot] Forwarding episode ${episode.id} via MTProto from ch=${sfForward.channelId} msg=${sfForward.messageId}`);
+            const ok = await forwardFromBinViaMtproto(chatId, sfForward.channelId, sfForward.messageId);
             if (ok) { await sendWatchButton(streamUrl); return; }
           }
         }
+
+        // Not deliverable — show watch-in-app message
+        const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+        const watchUrl = domain && parent ? `https://${domain}/app/movie/${parent.id}` : null;
+        const msg = `⚠️ *${parent?.title || 'Series'}* S${s}E${e}\n\nဤ ဇာတ်ကဗျာဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
+        if (watchUrl) {
+          const kbs = makeKeyboard(watchUrl);
+          try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
+          catch { try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
+        } else {
+          await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        }
+        return;
       } catch (e) {}
     }
 
@@ -552,29 +719,11 @@ export async function startBot() {
           return;
         }
       }
-      // ep_ prefix → direct episode delivery (bypasses movie lookup)
+      // ep_ prefix → direct episode delivery (never touches movie lookup)
       if (startParam.startsWith('ep_')) {
         const epId = parseInt(startParam.replace('ep_', ''));
         if (!isNaN(epId)) {
-          const episode = await storage.getEpisode(epId);
-          if (episode?.fileId) {
-            const parent = await storage.getMovie(episode.movieId);
-            const s = String(episode.seasonNumber ?? 1).padStart(2, '0');
-            const e = String(episode.episodeNumber ?? 1).padStart(2, '0');
-            try {
-              await botInstance?.sendVideo(chatId, episode.fileId, {
-                caption: `✅ *${parent?.title || 'Series'}*\nS${s}E${e}${episode.title ? `: ${episode.title}` : ''}\n\nEnjoy! 📥`,
-                parse_mode: 'Markdown',
-              });
-            } catch {
-              await botInstance?.sendDocument(chatId, episode.fileId, {
-                caption: `✅ *${parent?.title || 'Series'}* S${s}E${e}\n\nDelivered as file. 📥`,
-                parse_mode: 'Markdown',
-              });
-            }
-          } else {
-            await botInstance?.sendMessage(chatId, `❌ Episode not found.`, { reply_markup: await getMainKeyboard() });
-          }
+          await handleEpisodeDownload(chatId, epId);
           return;
         }
       }

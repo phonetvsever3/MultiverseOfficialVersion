@@ -55,7 +55,7 @@ export default function Stream() {
     staleTime: 0,
   });
 
-  const isLoading = (type === "movie" ? movieLoading : episodeLoading) || hlsChecking;
+  const isLoading = type === "movie" ? movieLoading : episodeLoading;
 
   if (!type || !id) {
     return (

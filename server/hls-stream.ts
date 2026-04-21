@@ -510,6 +510,17 @@ export function registerHlsRoutes(app: Express) {
         fileSize = movie.fileSize ?? null;
         streamUrl = movie.streamUrl ?? null;
         fileUniqueId = movie.fileUniqueId ?? null;
+        // Prefer syncedFiles fileId (captured by bot, always valid) over stored fileId
+        if (fileUniqueId) {
+          try {
+            const sf = await storage.getSyncedFileByUniqueId(fileUniqueId);
+            if (sf) {
+              if (sf.fileId) fileId = sf.fileId;
+              if (sf.fileSize && sf.fileSize > 0) fileSize = sf.fileSize;
+              if (!streamUrl && (sf as any).streamUrl) streamUrl = (sf as any).streamUrl;
+            }
+          } catch {}
+        }
         if (!fileId) {
           const matched = await findSyncedFileForMovie(movie);
           if (matched) {
@@ -526,6 +537,17 @@ export function registerHlsRoutes(app: Express) {
         fileSize = episode.fileSize ?? null;
         streamUrl = episode.streamUrl ?? null;
         fileUniqueId = episode.fileUniqueId ?? null;
+        // Prefer syncedFiles fileId (captured by bot, always valid) over stored fileId
+        if (fileUniqueId) {
+          try {
+            const sf = await storage.getSyncedFileByUniqueId(fileUniqueId);
+            if (sf) {
+              if (sf.fileId) fileId = sf.fileId;
+              if (sf.fileSize && sf.fileSize > 0) fileSize = sf.fileSize;
+              if (!streamUrl && (sf as any).streamUrl) streamUrl = (sf as any).streamUrl;
+            }
+          } catch {}
+        }
         if (!fileId) {
           const matched = await findSyncedFileForEpisode(episode);
           if (matched) {
