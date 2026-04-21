@@ -1318,6 +1318,65 @@ export async function registerRoutes(
     }
   });
 
+  // Get count of movies with invalid (non-Bot-API) file IDs
+  app.get("/api/admin/movies/invalid-file-ids", requireAdmin, async (_req, res) => {
+    try {
+      const { items } = await storage.getMovies({ limit: 100000 });
+      const invalid = items.filter(m =>
+        m.fileId && m.fileId !== 'placeholder_file_id' && !m.fileId.startsWith('BAACAgU')
+      );
+      res.json({ count: invalid.length, total: items.filter(m => m.fileId && m.fileId !== 'placeholder_file_id').length });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Bulk-heal invalid movie file IDs by matching via fileUniqueId in syncedFiles
+  app.post("/api/admin/movies/heal-invalid-file-ids", requireAdmin, async (_req, res) => {
+    try {
+      const { items: allMovies } = await storage.getMovies({ limit: 100000 });
+      const invalid = allMovies.filter(m =>
+        m.fileId && m.fileId !== 'placeholder_file_id' &&
+        !m.fileId.startsWith('BAACAgU') && !m.fileId.startsWith('BAACAgI') &&
+        !m.fileId.startsWith('BQACAgI') && !m.fileId.startsWith('CgACAgU') && !m.fileId.startsWith('DQACAgU')
+      );
+      let healed = 0;
+      let notFound = 0;
+      for (const m of invalid) {
+        if (!m.fileUniqueId) { notFound++; continue; }
+        try {
+          const sf = await storage.getSyncedFileByUniqueId(m.fileUniqueId);
+          if (sf?.fileId) {
+            await storage.updateMovie(m.id, { fileId: sf.fileId });
+            healed++;
+          } else {
+            notFound++;
+          }
+        } catch { notFound++; }
+      }
+      res.json({ healed, notFound, total: invalid.length, message: `Healed ${healed} movies. ${notFound} could not be matched (not in synced files).` });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Bulk-clear invalid (non-Bot-API) movie file IDs
+  app.post("/api/admin/movies/clear-invalid-file-ids", requireAdmin, async (_req, res) => {
+    try {
+      const { items } = await storage.getMovies({ limit: 100000 });
+      const invalid = items.filter(m =>
+        m.fileId && m.fileId !== 'placeholder_file_id' && !m.fileId.startsWith('BAACAgU')
+      );
+      let cleared = 0;
+      for (const m of invalid) {
+        try { await storage.updateMovie(m.id, { fileId: null }); cleared++; } catch {}
+      }
+      res.json({ cleared, message: `Cleared ${cleared} invalid file IDs. Re-sync movies via the Bot API to restore them.` });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Set stream URL for a movie
   app.patch("/api/admin/movies/:id/stream-url", requireAdmin, async (req, res) => {
     try {

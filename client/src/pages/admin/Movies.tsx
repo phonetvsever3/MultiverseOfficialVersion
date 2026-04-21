@@ -399,6 +399,36 @@ export default function AdminMovies() {
     }
   });
 
+  const { data: invalidFileStats } = useQuery<{ count: number; total: number }>({
+    queryKey: ['/api/admin/movies/invalid-file-ids'],
+  });
+
+  const clearInvalidFileIds = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/movies/clear-invalid-file-ids");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/movies/invalid-file-ids'] });
+      queryClient.invalidateQueries({ queryKey: [api.movies.list.path] });
+      toast({ title: "Invalid file IDs cleared", description: data.message });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const healInvalidFileIds = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/movies/heal-invalid-file-ids");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/movies/invalid-file-ids'] });
+      queryClient.invalidateQueries({ queryKey: [api.movies.list.path] });
+      toast({ title: `Healed ${data.healed} movies`, description: data.message });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const refreshAllTmdb = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/movies/refresh-all-tmdb");
@@ -652,6 +682,35 @@ export default function AdminMovies() {
             <p className="text-muted-foreground">Manage your movie and series database.</p>
           </div>
           
+          {invalidFileStats && invalidFileStats.count > 0 && (
+            <div className="flex flex-wrap items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+              <span className="text-sm text-amber-600 dark:text-amber-400 flex-1">
+                <strong>{invalidFileStats.count}</strong> movies have wrong-format file IDs — click <strong>Auto-Fix</strong> to match them from Synced Files
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-green-500 text-green-600 hover:bg-green-500/10 h-7 text-xs shrink-0"
+                onClick={() => healInvalidFileIds.mutate()}
+                disabled={healInvalidFileIds.isPending}
+                data-testid="button-heal-invalid-file-ids"
+              >
+                {healInvalidFileIds.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Auto-Fix File IDs"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500 text-amber-600 hover:bg-amber-500/10 h-7 text-xs shrink-0"
+                onClick={() => clearInvalidFileIds.mutate()}
+                disabled={clearInvalidFileIds.isPending}
+                data-testid="button-clear-invalid-file-ids"
+              >
+                {clearInvalidFileIds.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Clear Invalid IDs"}
+              </Button>
+            </div>
+          )}
+
           <div className="flex gap-3 w-full md:w-auto">
             <div className="relative flex-1 md:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -879,18 +938,34 @@ export default function AdminMovies() {
                       <FormField
                         control={form.control}
                         name="fileId"
-                        render={({ field }) => (
+                        render={({ field }) => {
+                          const fid = field.value || "";
+                          const isWrongFormat = fid.length > 10 && !fid.startsWith("BAACAgU") && !fid.startsWith("BAACAgI") && !fid.startsWith("BQACAgI") && !fid.startsWith("CgACAgU") && !fid.startsWith("DQACAgU");
+                          return (
                           <FormItem>
                             <FormLabel className="flex items-center gap-2">
                               <FileVideo className="w-4 h-4 text-primary" /> Telegram File ID (Movies Only)
                             </FormLabel>
                             <FormControl>
-                              <Input {...field} value={field.value || ""} placeholder="Get from bot or synced files" className="bg-primary/5 border-primary/20" />
+                              <Input {...field} value={fid} placeholder="Get from bot or synced files" className={`bg-primary/5 border-primary/20 ${isWrongFormat ? "border-red-500" : ""}`} />
                             </FormControl>
-                            <FormDescription className="text-[10px]">Required for direct movie delivery. Use synced files or bot upload.</FormDescription>
+                            {isWrongFormat && (
+                              <div className="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-500 space-y-1">
+                                <p className="font-semibold">⚠️ Wrong file ID format — this will NOT work!</p>
+                                <p>File IDs must come from the Telegram Bot API directly. The format you pasted is from a different source (MTProto/Pyrogram) and is incompatible.</p>
+                                <p className="font-medium">✅ How to get the correct file ID:</p>
+                                <ol className="list-decimal pl-4 space-y-0.5">
+                                  <li>Open <strong>@MultiverseMovies_Bot</strong> in Telegram</li>
+                                  <li>Send or forward the movie video file to the bot</li>
+                                  <li>The bot will reply with the correct File ID — copy and paste it here</li>
+                                </ol>
+                              </div>
+                            )}
+                            {!isWrongFormat && <FormDescription className="text-[10px]">Required for direct movie delivery. Send the file to @MultiverseMovies_Bot to get the correct ID.</FormDescription>}
                             <FormMessage />
                           </FormItem>
-                        )}
+                          );
+                        }}
                       />
                     )}
 

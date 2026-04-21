@@ -236,7 +236,8 @@ export async function startBot() {
     const isMovie = movie.type === 'movie';
     const rawOverview = (movie.overview || '').slice(0, 250);
     const overview = rawOverview ? await translateToMyanmar(rawOverview) : 'ဖော်ပြချက် မရှိပါ။';
-    const caption = [
+
+    const fullCaption = [
       `${isMovie ? '🎬' : '📺'} *${movie.title}* (${year})`,
       ``,
       `🎭 ဇာတ်လမ်းအမျိုးအစား: ${genre}`,
@@ -247,37 +248,65 @@ export async function startBot() {
       overview,
     ].join('\n');
 
-    // Use regular URL buttons — these work in both private chats AND groups
-    const buttonRow: any[] = [];
-    if (webAppUrl) {
-      buttonRow.push({ text: "▶️ Watch / Stream", url: webAppUrl });
-      buttonRow.push({ text: "📥 Download", url: `https://t.me/${botUsername}?start=${movie.id}` });
-    }
+    // web_app button = no ↗ URL arrow; fallback to url button in groups where web_app is rejected
+    const webAppKeyboard = webAppUrl
+      ? { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url: webAppUrl } }]] }
+      : undefined;
+    const urlFallbackKeyboard = webAppUrl
+      ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: webAppUrl }]] }
+      : undefined;
 
-    const keyboard = buttonRow.length ? { inline_keyboard: [buttonRow] } : undefined;
-
-    if (movie.posterPath) {
-      const posterUrl = `https://image.tmdb.org/t/p/w342${movie.posterPath}`;
+    // 1. If movie has a valid file — send file first, then Watch button as follow-up
+    const hasFile = movie.fileId && movie.fileId !== 'placeholder_file_id';
+    if (hasFile) {
+      const fileCaption = `✅ *${movie.title}*\nQuality: ${movie.quality || 'HD'}\n\nEnjoy! 🎬`;
+      let fileSent = false;
       try {
-        await botInstance?.sendPhoto(chatId, posterUrl, {
-          caption,
-          parse_mode: 'Markdown',
-          reply_markup: keyboard,
-        });
+        await botInstance?.sendVideo(chatId, movie.fileId, { caption: fileCaption, parse_mode: 'Markdown' });
+        fileSent = true;
+      } catch (ev: any) {
+        console.error(`[Bot] sendMovieCard sendVideo ${movie.id}:`, ev?.message);
+        try {
+          await botInstance?.sendDocument(chatId, movie.fileId, { caption: fileCaption, parse_mode: 'Markdown' });
+          fileSent = true;
+        } catch (ed: any) {
+          console.error(`[Bot] sendMovieCard sendDocument ${movie.id}:`, ed?.message);
+        }
+      }
+      if (fileSent) {
+        await storage.incrementMovieViews(movie.id);
+        // Send Watch button as separate follow-up
+        if (webAppUrl) {
+          try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: webAppKeyboard }); }
+          catch { try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: urlFallbackKeyboard }); } catch {} }
+        }
         return;
-      } catch (e: any) {
-        // poster failed (bad URL, network error), fall through to text message
       }
     }
 
-    try {
-      await botInstance?.sendMessage(chatId, caption, {
-        parse_mode: 'Markdown',
-        reply_markup: keyboard,
-      });
-    } catch (e: any) {
-      // Last resort: send without any inline keyboard
-      await botInstance?.sendMessage(chatId, caption, { parse_mode: 'Markdown' });
+    // 2. No file (or file send failed) — send poster photo with full info caption + Watch button
+    async function trySendPoster(keyboard: any) {
+      if (movie.posterPath) {
+        const posterUrl = `https://image.tmdb.org/t/p/w342${movie.posterPath}`;
+        try {
+          await botInstance?.sendPhoto(chatId, posterUrl, {
+            caption: fullCaption, parse_mode: 'Markdown', reply_markup: keyboard,
+          });
+          return true;
+        } catch {}
+      }
+      try {
+        await botInstance?.sendMessage(chatId, fullCaption, {
+          parse_mode: 'Markdown', reply_markup: keyboard,
+        });
+        return true;
+      } catch {}
+      return false;
+    }
+
+    // Try web_app button (no ↗); fallback to url button in groups
+    if (!await trySendPoster(webAppKeyboard)) {
+      await trySendPoster(urlFallbackKeyboard);
     }
   }
 
@@ -299,29 +328,99 @@ export async function startBot() {
 
   async function handleMovieDownload(chatId: number, id: number) {
     console.log(`[Bot] Delivery request — ID: ${id}, Chat: ${chatId}`);
-    const movie = await storage.getMovie(id);
-    if (movie && movie.fileId && movie.fileId !== 'placeholder_file_id') {
-      const streamUrl = buildStreamWebAppUrl("movie", movie.id);
-      // Use regular URL button — works in both private chats and groups
-      const inlineKeyboard = streamUrl
-        ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: streamUrl }]] }
-        : undefined;
-      try {
-        await botInstance?.sendVideo(chatId, movie.fileId, {
-          caption: `✅ *${movie.title}*\nQuality: ${movie.quality}\n\nEnjoy! 📥`,
-          parse_mode: 'Markdown',
-          reply_markup: inlineKeyboard,
-        });
-        await storage.incrementMovieViews(movie.id);
-        return;
-      } catch (err: any) {
+
+    function makeKeyboard(url: string) {
+      // web_app = no ↗ arrow; fallback url keyboard used if web_app is rejected in groups
+      return {
+        webApp: { inline_keyboard: [[{ text: "▶️ Watch in App", web_app: { url } }]] },
+        urlFallback: { inline_keyboard: [[{ text: "▶️ Watch in App", url }]] },
+      };
+    }
+
+    // Helper: try sendVideo then sendDocument, return true if success, error string if invalid file ID
+    async function trySendFile(fileId: string, caption: string): Promise<'ok' | 'invalid' | 'fail'> {
+      let lastErr = '';
+      for (const send of ['video', 'document'] as const) {
         try {
-          await botInstance?.sendDocument(chatId, movie.fileId, {
-            caption: `✅ *${movie.title}*\n\nDelivered as file. 📥`,
-            parse_mode: 'Markdown',
-            reply_markup: inlineKeyboard,
-          });
+          if (send === 'video') {
+            await botInstance?.sendVideo(chatId, fileId, { caption, parse_mode: 'Markdown' });
+          } else {
+            await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
+          }
+          return 'ok';
+        } catch (e: any) {
+          lastErr = e?.message || String(e);
+          console.error(`[Bot] send${send === 'video' ? 'Video' : 'Document'} failed:`, lastErr);
+          if (lastErr.includes('wrong remote file identifier') || lastErr.includes('WRONG_FILE_ID')) {
+            return 'invalid'; // Bad file ID — stop retrying
+          }
+        }
+      }
+      return 'fail';
+    }
+
+    async function sendWatchButton(streamUrl: string | null) {
+      if (!streamUrl) return;
+      const kbs = makeKeyboard(streamUrl);
+      try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: kbs.webApp }); }
+      catch { try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: kbs.urlFallback }); } catch {} }
+    }
+
+    const movie = await storage.getMovie(id);
+    if (movie) {
+      const streamUrl = buildStreamWebAppUrl("movie", movie.id);
+      const caption = `✅ *${movie.title}*\nQuality: ${movie.quality || 'HD'}\n\nEnjoy! 🎬`;
+
+      // Helper: try to send using a specific fileId; if it succeeds, optionally heal movie.fileId
+      async function tryMovieFile(fileId: string, healFileId?: string): Promise<boolean> {
+        const result = await trySendFile(fileId, caption);
+        if (result === 'ok') {
+          // Auto-heal stored fileId if we used an alternative (e.g. from syncedFiles)
+          if (healFileId && healFileId !== movie!.fileId) {
+            try { await storage.updateMovie(movie!.id, { fileId: healFileId }); } catch {}
+          }
+          await storage.incrementMovieViews(movie!.id);
+          await sendWatchButton(streamUrl);
+          return true;
+        }
+        return false;
+      }
+
+      // 1. Try stored movie fileId directly
+      if (movie.fileId && movie.fileId !== 'placeholder_file_id') {
+        const result = await trySendFile(movie.fileId, caption);
+        if (result === 'ok') {
+          await storage.incrementMovieViews(movie.id);
+          await sendWatchButton(streamUrl);
           return;
+        }
+
+        if (result === 'invalid') {
+          // fileId format rejected by Bot API — try to recover via SyncedFiles
+          // fileUniqueId is the same across all Telegram clients, so look up the
+          // same file that was captured by the bot's channel scan (valid Bot API format)
+          console.warn(`[Bot] Invalid fileId for movie ${movie.id} (${movie.title}) — trying fileUniqueId lookup`);
+          if (movie.fileUniqueId) {
+            try {
+              const sf = await storage.getSyncedFileByUniqueId(movie.fileUniqueId);
+              if (sf?.fileId) {
+                console.log(`[Bot] Found matching syncedFile ${sf.id} for movie ${movie.id} — using valid fileId`);
+                if (await tryMovieFile(sf.fileId, sf.fileId)) return;
+              }
+            } catch (e) {}
+          }
+          // No recovery found — show Myanmar error (do NOT clear fileId, keep for debugging)
+        }
+        // result === 'fail' or recovery also failed — fall through
+      }
+
+      // 2. Try lookup via fileUniqueId in syncedFiles (covers movies with no fileId or failed fileId)
+      if (movie.fileUniqueId) {
+        try {
+          const sf = await storage.getSyncedFileByUniqueId(movie.fileUniqueId);
+          if (sf?.fileId) {
+            if (await tryMovieFile(sf.fileId, sf.fileId)) return;
+          }
         } catch (e) {}
       }
     }
@@ -331,39 +430,31 @@ export async function startBot() {
       try {
         const parent = await storage.getMovie(episode.movieId);
         const streamUrl = buildStreamWebAppUrl("episode", episode.id);
-        // Use regular URL button — works in both private chats and groups
-        const inlineKeyboard = streamUrl
-          ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: streamUrl }]] }
-          : undefined;
-        await botInstance?.sendVideo(chatId, episode.fileId, {
-          caption: `✅ *${parent?.title || 'Series'}*\nS${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}\n\nEnjoy! 📥`,
-          parse_mode: 'Markdown',
-          reply_markup: inlineKeyboard,
-        });
-        return;
+        const caption = `✅ *${parent?.title || 'Series'}*\nS${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}\n\nEnjoy! 🎬`;
+        const result = await trySendFile(episode.fileId, caption);
+        if (result === 'ok') {
+          await sendWatchButton(streamUrl);
+          return;
+        }
       } catch (e) {}
     }
 
-    const { items: syncedFiles } = await storage.getSyncedFiles({ limit: 10000 });
-    const sf = syncedFiles.find(f => f.id === id);
-    if (sf?.fileId) {
-      try {
-        await botInstance?.sendDocument(chatId, sf.fileId, {
-          caption: `✅ *${sf.fileName}*\n\nFile synced from channel. 📥`,
-          parse_mode: 'Markdown',
-        });
-        return;
-      } catch (e) {}
-    }
-
-    // File can't be delivered directly — fall back to movie card with stream link
-    const fallbackMovie = await storage.getMovie(id);
-    if (fallbackMovie) {
-      await sendMovieCard(chatId, fallbackMovie);
+    // File not deliverable — show clean "not available" message (never show poster card here)
+    const notFoundMovie = await storage.getMovie(id);
+    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+    if (notFoundMovie) {
+      const watchUrl = domain ? `https://${domain}/app/movie/${notFoundMovie.id}` : null;
+      const msg = `⚠️ *${notFoundMovie.title}*\n\nဤ ရုပ်ရှင်ဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
+      if (watchUrl) {
+        const kbs = makeKeyboard(watchUrl);
+        try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
+        catch { try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
+      } else {
+        await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+      }
       return;
     }
 
-    // Nothing found at all
     const kb = await getMainKeyboard();
     if (botInstance) await sendWithKeyboard(botInstance, chatId,
       `❌ Content with ID ${id} was not found.`, {}, kb);
@@ -593,22 +684,28 @@ export async function startBot() {
     }
   });
 
-  // ─── Admin: video sent to bot ──────────────────────────────────────────────
-  botInstance.on('video', async (msg) => {
+  // ─── Admin: video/document sent to bot — capture valid Bot API file_id ───────
+  async function handleAdminFileSent(msg: TelegramBot.Message) {
     const user = await storage.getUser(String(msg.from?.id));
     if (!user?.isAdmin) return;
-    if (msg.video?.file_id) {
-      const movie = await storage.createMovie({
-        fileId: msg.video.file_id,
-        fileUniqueId: msg.video.file_unique_id || 'unq',
-        title: (msg.caption || "Untitled").split('\n')[0],
-        caption: msg.caption || "",
-        fileSize: msg.video.file_size || 0,
-        type: 'movie',
-        quality: 'HD',
-      });
-      await botInstance?.sendMessage(msg.chat.id, `✅ Saved! ID: \`${movie.id}\``, { parse_mode: 'Markdown' });
-    }
+    const file = msg.video || msg.document;
+    if (!file?.file_id) return;
+    const validFileId = file.file_id;
+    const title = msg.caption?.split('\n')[0]?.trim() || (msg.video ? 'Video' : 'File');
+    // Reply with the valid Bot API file_id so admin can copy it into the movie edit form
+    await botInstance?.sendMessage(msg.chat.id,
+      `✅ *File received!*\n\n📋 *Valid Telegram File ID:*\n\`${validFileId}\`\n\n👆 Copy this ID and paste it into the movie's "Telegram File ID" field in the Admin Panel.\n\nMovie title detected: *${title}*`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  botInstance.on('video', handleAdminFileSent);
+  botInstance.on('document', async (msg) => {
+    const user = await storage.getUser(String(msg.from?.id));
+    if (!user?.isAdmin) return;
+    const doc = msg.document;
+    if (!doc?.mime_type?.startsWith('video/')) return; // only video documents
+    await handleAdminFileSent(msg);
   });
 
   // ─── Channel post sync ─────────────────────────────────────────────────────
