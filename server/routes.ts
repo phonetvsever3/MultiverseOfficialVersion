@@ -348,9 +348,49 @@ export async function registerRoutes(
 
   // Episodes
   app.get("/api/movies/:id/episodes", async (req, res) => {
+    const movieId = Number(req.params.id);
     const season = req.query.season ? Number(req.query.season) : undefined;
-    const episodes = await storage.getEpisodes(Number(req.params.id), season);
-    res.json(episodes);
+    let eps = await storage.getEpisodes(movieId, season);
+
+    // Auto-populate from TMDB if a series has no episodes yet.
+    if (eps.length === 0) {
+      try {
+        const movie = await storage.getMovie(movieId);
+        if (movie && movie.type === "series" && movie.tmdbId) {
+          const settingsRow = await storage.getSettings();
+          const apiKey = settingsRow?.tmdbApiKey;
+          if (apiKey) {
+            const seasonsToFetch = season ? [season] : [1];
+            for (const sn of seasonsToFetch) {
+              const tmdbRes = await fetch(
+                `https://api.themoviedb.org/3/tv/${movie.tmdbId}/season/${sn}?api_key=${apiKey}`
+              );
+              if (!tmdbRes.ok) continue;
+              const seasonData: any = await tmdbRes.json();
+              for (const ep of (seasonData.episodes || [])) {
+                await storage.createEpisode({
+                  movieId,
+                  seasonNumber: sn,
+                  episodeNumber: ep.episode_number,
+                  title: ep.name || null,
+                  overview: ep.overview || null,
+                  airDate: ep.air_date || null,
+                  rating: ep.vote_average ? Math.round(ep.vote_average * 10) : null,
+                  fileId: "",
+                  fileSize: 0,
+                  fileUniqueId: `tmdb_s${sn}e${ep.episode_number}_${movieId}`,
+                } as any);
+              }
+            }
+            eps = await storage.getEpisodes(movieId, season);
+          }
+        }
+      } catch (e) {
+        console.warn("[Episodes] Auto-fetch from TMDB failed:", (e as any)?.message);
+      }
+    }
+
+    res.json(eps);
   });
 
   app.post("/api/episodes", async (req, res) => {

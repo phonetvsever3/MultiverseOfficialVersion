@@ -297,7 +297,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
           setLoading(false);
         }
       }
-    }, 12000);
+    }, 60000);
 
     player.on("timeupdate", () => {
       const ct = player.currentTime() ?? 0;

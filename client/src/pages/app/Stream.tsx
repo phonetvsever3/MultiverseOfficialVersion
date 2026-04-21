@@ -161,9 +161,17 @@ export default function Stream() {
     });
   }
 
-  // 3. Always include the built-in Telegram/HLS stream as a fallback
+  // 3. Built-in HLS playlist (chunked .ts segments — plays progressively
+  //    even when MP4 moov atom is at the end of a large file).
   sources.push({
-    label: sources.length > 0 ? "Auto" : (type === "movie" ? movie?.quality || "HD" : "HD"),
+    label: sources.length > 0 ? "Auto (HLS)" : (type === "movie" ? movie?.quality || "HD" : "HD"),
+    url: `/api/hls/${type}/${id}/playlist.m3u8`,
+    type: "hls",
+  });
+
+  // 4. Direct MP4 stream as a final fallback.
+  sources.push({
+    label: "Direct MP4",
     url: `/api/stream/${type}/${id}`,
     type: "mp4",
   });

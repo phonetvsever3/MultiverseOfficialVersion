@@ -681,7 +681,7 @@ export default function AdminMovies() {
             <h1 className="text-3xl font-black font-display text-foreground tracking-tight">Movies Library</h1>
             <p className="text-muted-foreground">Manage your movie and series database.</p>
           </div>
-          
+
           {invalidFileStats && invalidFileStats.count > 0 && (
             <div className="flex flex-wrap items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5">
               <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />

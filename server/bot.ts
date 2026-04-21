@@ -1,6 +1,45 @@
 import TelegramBot from 'node-telegram-bot-api';
+import { Api } from 'telegram';
+import bigInt from 'big-integer';
 import { storage } from './storage';
 import { translateToMyanmar } from './translate';
+import { getTgClient } from './tg-stream';
+
+// Forward a message from the bin channel to a user chat using MTProto.
+// This bypasses Bot API file_id limitations (e.g. "wrong remote file identifier
+// specified: can't unserialize it" for files captured by another client).
+async function forwardFromBinViaMtproto(
+  chatId: number,
+  channelId: string,
+  messageId: number
+): Promise<boolean> {
+  try {
+    const settings = await storage.getSettings();
+    const apiId = settings?.fsbApiId;
+    const apiHash = settings?.fsbApiHash;
+    const botToken = settings?.fsbBotToken || settings?.botToken;
+    if (!apiId || !apiHash || !botToken) return false;
+
+    const client = await getTgClient(apiId, apiHash, botToken);
+    const fromPeer = await client.getInputEntity(channelId);
+    const toPeer = await client.getInputEntity(bigInt(chatId) as any);
+
+    await client.invoke(
+      new Api.messages.ForwardMessages({
+        fromPeer,
+        id: [messageId],
+        randomId: [bigInt.randBetween('1', '9223372036854775807')],
+        toPeer,
+        dropAuthor: true,
+        dropMediaCaptions: false,
+      })
+    );
+    return true;
+  } catch (e: any) {
+    console.error(`[Bot] MTProto forward failed (chat=${chatId}, ch=${channelId}, msg=${messageId}):`, e?.message || e);
+    return false;
+  }
+}
 
 let botInstance: TelegramBot | null = null;
 let botStarting = false;
@@ -359,11 +398,9 @@ export async function startBot() {
       return 'fail';
     }
 
-    async function sendWatchButton(streamUrl: string | null) {
-      if (!streamUrl) return;
-      const kbs = makeKeyboard(streamUrl);
-      try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: kbs.webApp }); }
-      catch { try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: kbs.urlFallback }); } catch {} }
+    async function sendWatchButton(_streamUrl: string | null) {
+      // Disabled: do not send extra ▶️ message + Watch in App button after delivery.
+      return;
     }
 
     const movie = await storage.getMovie(id);
@@ -421,6 +458,16 @@ export async function startBot() {
           if (sf?.fileId) {
             if (await tryMovieFile(sf.fileId, sf.fileId)) return;
           }
+          // 3. Bot API rejected the fileId — forward the original message via MTProto.
+          if (sf?.channelId && sf?.messageId) {
+            console.log(`[Bot] Forwarding movie ${movie.id} via MTProto from ch=${sf.channelId} msg=${sf.messageId}`);
+            const ok = await forwardFromBinViaMtproto(chatId, sf.channelId, sf.messageId);
+            if (ok) {
+              await storage.incrementMovieViews(movie.id);
+              await sendWatchButton(streamUrl);
+              return;
+            }
+          }
         } catch (e) {}
       }
     }
@@ -435,6 +482,15 @@ export async function startBot() {
         if (result === 'ok') {
           await sendWatchButton(streamUrl);
           return;
+        }
+        // Episode fileId rejected — try MTProto forward via syncedFiles
+        if (result === 'invalid' && episode.fileUniqueId) {
+          const sf = await storage.getSyncedFileByUniqueId(episode.fileUniqueId);
+          if (sf?.channelId && sf?.messageId) {
+            console.log(`[Bot] Forwarding episode ${episode.id} via MTProto from ch=${sf.channelId} msg=${sf.messageId}`);
+            const ok = await forwardFromBinViaMtproto(chatId, sf.channelId, sf.messageId);
+            if (ok) { await sendWatchButton(streamUrl); return; }
+          }
         }
       } catch (e) {}
     }
