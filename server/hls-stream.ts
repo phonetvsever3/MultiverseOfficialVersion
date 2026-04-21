@@ -87,7 +87,8 @@ async function resolveSource(
   fileId: string,
   streamUrl: string | null | undefined,
   storedSize: number | null | undefined,
-  mtprotoCreds: MtprotoCredentials | null
+  mtprotoCreds: MtprotoCredentials | null,
+  fileUniqueId?: string | null
 ): Promise<SourceInfo> {
   // ── Path 1: File Stream Bot URL ──────────────────────────────────────────
   if (streamUrl) {
@@ -98,10 +99,25 @@ async function resolveSource(
   }
 
   // ── Path 2: Built-in MTProto streaming ──────────────────────────────────
-  if (mtprotoCreds && storedSize && storedSize > 0) {
+  if (mtprotoCreds) {
     try {
       const location = parseTelegramFileId(fileId);
-      return { url: null, fileSize: storedSize, mtproto: location };
+      let size = storedSize && storedSize > 0 ? storedSize : 0;
+
+      if (!size && fileUniqueId) {
+        // Look up file size from synced files table (most reliable source)
+        try {
+          const synced = await storage.getSyncedFileByUniqueId(fileUniqueId);
+          if (synced?.fileSize && synced.fileSize > 0) {
+            size = synced.fileSize;
+          }
+        } catch {}
+      }
+
+      if (size > 0) {
+        return { url: null, fileSize: size, mtproto: location };
+      }
+      // Could not determine size — fall through
     } catch (err: any) {
       console.warn("[HLS] MTProto fileId parse failed:", err.message);
     }
@@ -241,6 +257,7 @@ export function registerHlsRoutes(app: Express) {
       let fileSize: number | null = null;
       let duration: number | null = null;
       let streamUrl: string | null = null;
+      let fileUniqueId: string | null = null;
 
       if (type === "movie") {
         const movie = await storage.getMovie(numId);
@@ -250,16 +267,18 @@ export function registerHlsRoutes(app: Express) {
         fileSize = movie.fileSize ?? null;
         duration = movie.duration ?? null;
         streamUrl = movie.streamUrl ?? null;
+        fileUniqueId = movie.fileUniqueId ?? null;
       } else {
         const episode = await storage.getEpisode(numId);
         if (!episode) return res.status(404).json({ message: "Episode not found" });
         fileId = episode.fileId;
         fileSize = episode.fileSize ?? null;
         streamUrl = episode.streamUrl ?? null;
+        fileUniqueId = episode.fileUniqueId ?? null;
       }
 
       const mtprotoCreds = await getMtprotoCreds();
-      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds);
+      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds, fileUniqueId);
 
       const resolvedSize = source.fileSize;
       if (!resolvedSize) {
@@ -317,7 +336,7 @@ export function registerHlsRoutes(app: Express) {
       }
 
       const mtprotoCreds = await getMtprotoCreds();
-      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds);
+      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds, fileUniqueId);
 
       if (!source.fileSize) return res.status(422).json({ message: "File size unknown" });
 
@@ -433,7 +452,7 @@ export function registerHlsRoutes(app: Express) {
       }
 
       const mtprotoCreds = await getMtprotoCreds();
-      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds);
+      const source = await resolveSource(token, fileId!, streamUrl, fileSize, mtprotoCreds, fileUniqueId);
 
       if (!source.fileSize) return res.status(422).json({ message: "File size unknown" });
 

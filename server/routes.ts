@@ -1347,7 +1347,10 @@ export async function registerRoutes(
         try {
           const sf = await storage.getSyncedFileByUniqueId(m.fileUniqueId);
           if (sf?.fileId) {
-            await storage.updateMovie(m.id, { fileId: sf.fileId });
+            const updates: Record<string, any> = { fileId: sf.fileId };
+            if (sf.fileUniqueId) updates.fileUniqueId = sf.fileUniqueId;
+            if (sf.fileSize && sf.fileSize > 0) updates.fileSize = sf.fileSize;
+            await storage.updateMovie(m.id, updates);
             healed++;
           } else {
             notFound++;
