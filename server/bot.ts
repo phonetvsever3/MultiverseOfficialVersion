@@ -607,6 +607,20 @@ export async function startBot() {
           }
         } catch (e) {}
       }
+
+      // 4. MTProto direct send using parsed document location from stored fileId.
+      //    Bypasses Bot API entirely — works even when fileId format is rejected.
+      if (movie.fileId && movie.fileId !== 'placeholder_file_id') {
+        try {
+          console.log(`[Bot] Trying MTProto direct send for movie ${movie.id} chat=${chatId}`);
+          const ok = await sendDocumentViaMtproto(chatId, movie.fileId, caption);
+          if (ok) {
+            await storage.incrementMovieViews(movie.id);
+            await sendWatchButton(streamUrl);
+            return;
+          }
+        } catch {}
+      }
     }
 
     const episode = await storage.getEpisode(id);
