@@ -490,6 +490,9 @@ export function registerHlsRoutes(app: Express) {
       return res.status(400).json({ message: "Invalid type or id" });
     }
 
+    const rangeHeader = req.headers.range || "none";
+    console.log(`[Stream] ${type}/${id} Range=${rangeHeader}`);
+
     try {
       const settings = await storage.getSettings();
       if (settings?.streamEnabled === false) {

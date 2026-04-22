@@ -127,6 +127,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
   const [orientationLocked,setOrientationLocked]= useState(false);
   const [pipAvailable,     setPipAvailable]     = useState(false);
   const [isPip,            setIsPip]            = useState(false);
+  const [loadingLong,      setLoadingLong]      = useState(false);
 
   // Mid-roll ad state
   const [adVisible,    setAdVisible]    = useState(false);
@@ -333,11 +334,15 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
     // Network-activity-based stuck detector.
     // Files with moov atom at end (not fast-start) require the browser to seek
-    // to the very end (e.g. 387 MB) before playing. Each MTProto range request
-    // takes 3-200 seconds. As long as the browser is still downloading (the
-    // native video 'progress' event fires), we wait. Only error after 60 s of
-    // total silence (no data received and not playing).
-    let lastProgressTime = Date.now();
+    // to the very end before it can play. Each MTProto range request can take
+    // 3-200 seconds. We use the native video element's networkState to detect
+    // whether the browser is still actively downloading (networkState === 2).
+    // Only show an error when the browser has genuinely stopped loading AND
+    // the video hasn't become playable yet.
+    // Require consecutive idle ticks before declaring stuck (avoids false
+    // positives when networkState briefly dips to IDLE between range requests,
+    // e.g. between the 200 s moov-seek response and the next mdat request).
+    let idleCount = 0;
     const stuckChecker = setInterval(() => {
       if (!playerRef.current || playerRef.current.isDisposed()) {
         clearInterval(stuckChecker);
@@ -347,19 +352,25 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
         clearInterval(stuckChecker);
         return;
       }
-      if (Date.now() - lastProgressTime > 60000) {
-        const readyState = (playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null)?.readyState ?? 0;
-        if (readyState < 2) {
-          setError(true);
-          setLoading(false);
-        }
+      const vid = playerRef.current.el()?.querySelector("video") as HTMLVideoElement | null;
+      if (!vid) return;
+      const networkState = vid.networkState; // 0=EMPTY 1=IDLE 2=LOADING 3=NO_SOURCE
+      const readyState   = vid.readyState;   // 0=NOTHING 1=METADATA 2=CURRENT 3=FUTURE 4=ENOUGH
+      // NETWORK_LOADING (2) → actively fetching (moov seek, range requests, etc.)
+      // Reset counter whenever the browser is busy.
+      if (networkState === 2 || readyState >= 2) {
+        idleCount = 0;
+        return;
+      }
+      // Idle and not ready — count up. Only error after 4 consecutive idle
+      // ticks (≥ 12 s of genuine inactivity) to survive brief IDLE gaps.
+      idleCount++;
+      if (idleCount >= 4) {
+        setError(true);
+        setLoading(false);
         clearInterval(stuckChecker);
       }
-    }, 5000);
-
-    if (internalEl) {
-      internalEl.addEventListener("progress", () => { lastProgressTime = Date.now(); });
-    }
+    }, 3000);
 
     if (showPrerollRef.current && !prerollShown.current) {
       prerollShown.current = true;
@@ -392,6 +403,16 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       unlockOrientation();
     };
   }, [activeIndex]);
+
+  // Show "still loading" hint after 30 s — large files (moov at end) can take minutes
+  useEffect(() => {
+    if (!loading || error) {
+      setLoadingLong(false);
+      return;
+    }
+    const t = setTimeout(() => setLoadingLong(true), 30000);
+    return () => clearTimeout(t);
+  }, [loading, error]);
 
   // Auto-fullscreen + landscape lock on player open
   useEffect(() => {
@@ -573,7 +594,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
       {/* LOADING — show poster as background while buffering so screen isn't blank */}
       {loading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none z-10">
           {poster && (
             <img
               src={poster}
@@ -587,6 +608,11 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
             <div className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-red-500 animate-spin" />
             <Film className="absolute inset-0 m-auto w-5 h-5 text-white/20" />
           </div>
+          {loadingLong && (
+            <p className="relative text-white/50 text-xs text-center px-6 max-w-xs leading-relaxed">
+              ဖိုင်ကြီးသောကြောင့် ခဏစောင့်ပါ…
+            </p>
+          )}
         </div>
       )}
 
