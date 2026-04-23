@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { AdRenderer } from "@/components/AdRenderer";
 import { type Ad } from "@shared/schema";
+import { updateWatchProgress } from "@/lib/watch-history";
 
 export interface VideoSource {
   label: string;
@@ -23,6 +24,7 @@ interface VideoPlayerProps {
   onClose: () => void;
   showMidrollAd?: boolean;
   showPrerollAd?: boolean;
+  saveProgressMovieId?: number; // when set, saves watch progress to localStorage every 10 s
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -100,7 +102,7 @@ async function exitFullscreen() {
   try { await document.exitFullscreen(); } catch {}
 }
 
-export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = false, showPrerollAd = false }: VideoPlayerProps) {
+export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = false, showPrerollAd = false, saveProgressMovieId }: VideoPlayerProps) {
   const wrapperRef    = useRef<HTMLDivElement>(null);
   const containerRef  = useRef<HTMLDivElement>(null);
   const playerRef     = useRef<ReturnType<typeof videojs> | null>(null);
@@ -381,7 +383,18 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     }
     player.one("play",  () => clearInterval(stuckChecker));
     player.one("error", () => clearInterval(stuckChecker));
-  }, [sources, poster, resetHide, triggerMidrollAd, triggerPrerollAd]);
+
+    // Save watch progress to localStorage every 10 s while playing
+    if (saveProgressMovieId) {
+      const progressTimer = setInterval(() => {
+        if (!playerRef.current || playerRef.current.isDisposed()) { clearInterval(progressTimer); return; }
+        const ct = playerRef.current.currentTime() ?? 0;
+        const dur = playerRef.current.duration() ?? 0;
+        if (ct > 5 && dur > 0) updateWatchProgress(saveProgressMovieId, ct, dur);
+      }, 10000);
+      player.one("dispose", () => clearInterval(progressTimer));
+    }
+  }, [sources, poster, resetHide, triggerMidrollAd, triggerPrerollAd, saveProgressMovieId]);
 
   useEffect(() => {
     adShown.current = false;

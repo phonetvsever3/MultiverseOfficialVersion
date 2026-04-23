@@ -183,6 +183,7 @@ export default function Stream() {
           sources={sources}
           poster={poster}
           title={title}
+          saveProgressMovieId={type === "movie" ? id : episode?.movieId}
           onClose={() => {
             if (window.history.length > 1) {
               window.history.back();

@@ -7,7 +7,8 @@ import { type Movie } from "@shared/schema";
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { FloatingFileMascot, AnimatedMovieIcon, AnimatedSeriesIcon } from "@/components/FloatingFileMascot";
 import { fullscreenAdShownFor } from "@/lib/ad-session";
-import { getWatchHistoryIds } from "@/lib/watch-history";
+import { getWatchHistoryIds, getWatchHistory } from "@/lib/watch-history";
+import { getWatchlistIds } from "@/lib/watchlist";
 
 const tg = (window as any).Telegram?.WebApp;
 const TMDB_IMAGE = "https://image.tmdb.org/t/p/";
@@ -41,7 +42,7 @@ function getPoster(path: string | null | undefined, size = "w342") {
 }
 
 // ── Cinema Card: redesigned poster card for all genre/section rows ─────────
-function CinemaCard({ movie, onClick, rank }: { movie: Movie; onClick: () => void; rank?: number }) {
+function CinemaCard({ movie, onClick, rank, progressPct }: { movie: Movie; onClick: () => void; rank?: number; progressPct?: number }) {
   const poster = getPoster(movie.posterPath, "w500");
   return (
     <motion.div
@@ -95,6 +96,13 @@ function CinemaCard({ movie, onClick, rank }: { movie: Movie; onClick: () => voi
             </div>
           ) : null}
         </div>
+
+        {/* Watch progress bar */}
+        {progressPct !== undefined && progressPct > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
+            <div className="h-full bg-red-500 rounded-full" style={{ width: `${Math.min(progressPct, 100)}%` }} />
+          </div>
+        )}
       </div>
       <p className="text-[11px] text-white/80 font-semibold truncate px-0.5 leading-tight">{movie.title}</p>
       {movie.releaseDate && (
@@ -113,6 +121,7 @@ function GenreSection({
   onMovieClick,
   onSeeMore,
   showRank = false,
+  progressMap,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -121,6 +130,7 @@ function GenreSection({
   onMovieClick: (id: number) => void;
   onSeeMore?: () => void;
   showRank?: boolean;
+  progressMap?: Record<number, number>;
 }) {
   if (!items || items.length === 0) return null;
   return (
@@ -151,6 +161,7 @@ function GenreSection({
             movie={movie}
             onClick={() => onMovieClick(movie.id)}
             rank={showRank ? idx + 1 : undefined}
+            progressPct={progressMap?.[movie.id]}
           />
         ))}
       </div>
@@ -265,6 +276,28 @@ export default function Home() {
       return historyIds.map(id => data.find(m => m.id === id)).filter(Boolean) as Movie[];
     },
     enabled: historyIds.length > 0,
+  });
+
+  // Build a map of movieId → progress percentage for "Continue Watching" progress bars
+  const progressMap: Record<number, number> = {};
+  for (const entry of getWatchHistory()) {
+    if (entry.progress && entry.duration && entry.duration > 0) {
+      progressMap[entry.movieId] = Math.round((entry.progress / entry.duration) * 100);
+    }
+  }
+
+  // My List (watchlist)
+  const watchlistIds = getWatchlistIds();
+  const { data: watchlistMovies = [] } = useQuery<Movie[]>({
+    queryKey: ["/api/movies/by-ids", "wl", watchlistIds.join(",")],
+    queryFn: async () => {
+      if (watchlistIds.length === 0) return [];
+      const res = await fetch(`/api/movies/by-ids?ids=${watchlistIds.join(",")}`);
+      if (!res.ok) return [];
+      const data: Movie[] = await res.json();
+      return watchlistIds.map(id => data.find(m => m.id === id)).filter(Boolean) as Movie[];
+    },
+    enabled: watchlistIds.length > 0,
   });
 
   useEffect(() => {
@@ -522,6 +555,17 @@ export default function Home() {
               onSeeMore={() => setLocation('/app/browse?sort=views&title=Most+Viewed')}
             />
 
+            {/* My List */}
+            {watchlistMovies.length > 0 && (
+              <GenreSection
+                title="My List"
+                icon={<Heart className="w-4 h-4 text-red-400" />}
+                accent="bg-red-500"
+                items={watchlistMovies}
+                onMovieClick={handleMovieClick}
+              />
+            )}
+
             {/* Continue Watching */}
             {watchHistoryMovies.length > 0 && (
               <GenreSection
@@ -530,6 +574,7 @@ export default function Home() {
                 accent="bg-cyan-500"
                 items={watchHistoryMovies}
                 onMovieClick={handleMovieClick}
+                progressMap={progressMap}
               />
             )}
 

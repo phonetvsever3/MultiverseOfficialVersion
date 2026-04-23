@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMovie } from "@/hooks/use-movies";
-import { Calendar, Star, Film, Download, Tv, Play, ChevronLeft, User, Sparkles, ArrowRight, X, Database, Shield } from "lucide-react";
+import { Calendar, Star, Film, Download, Tv, Play, ChevronLeft, User, Sparkles, ArrowRight, X, Database, Shield, Heart } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { type Episode, type Movie } from "@shared/schema";
 import { addToWatchHistory } from "@/lib/watch-history";
+import { isInWatchlist, toggleWatchlist } from "@/lib/watchlist";
 import { SmartLinkAdBox } from "@/components/SmartLinkAdBox";
 import { motion } from "framer-motion";
 
@@ -53,6 +54,7 @@ export default function MovieView() {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [showTrailer, setShowTrailer] = useState(false);
   const [adBox, setAdBox] = useState<{ mode: "watch" | "download"; action: () => void } | null>(null);
+  const [favorited, setFavorited] = useState(() => isInWatchlist(movieId));
 
   const { data: trailer } = useQuery<TrailerInfo | null>({
     queryKey: [`/api/movies/${movieId}/trailer`],
@@ -255,16 +257,33 @@ export default function MovieView() {
         </div>
       </div>
 
-      {/* ── Genre chips ── */}
-      {genres.length > 0 && (
-        <div className="flex gap-2 px-5 pt-4 flex-wrap">
+      {/* ── Genre chips + Watchlist button ── */}
+      <div className="flex items-center justify-between gap-2 px-5 pt-4">
+        <div className="flex gap-2 flex-wrap">
           {genres.map((g) => (
             <span key={g} className="rounded-full px-3 py-1 text-[10px] font-bold text-white/50 uppercase tracking-wider" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
               {g}
             </span>
           ))}
         </div>
-      )}
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          data-testid="button-watchlist"
+          onClick={() => {
+            const next = toggleWatchlist(movieId);
+            setFavorited(next);
+          }}
+          className="flex-shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-all"
+          style={{
+            background: favorited ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.06)",
+            border: favorited ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.08)",
+            color: favorited ? "#f87171" : "rgba(255,255,255,0.4)",
+          }}
+        >
+          <Heart className={`w-3.5 h-3.5 transition-all ${favorited ? "fill-red-400 text-red-400" : ""}`} />
+          {favorited ? "Saved" : "Save"}
+        </motion.button>
+      </div>
 
       {/* ── 320x50 Banner Ad (above Watch Now) ── */}
       {bannerAdConfig?.enabled && bannerAdConfig?.code && (
