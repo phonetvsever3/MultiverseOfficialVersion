@@ -355,6 +355,7 @@ export default function AdminMovies() {
   const { mutate: updateMovie, isPending: isUpdating } = useUpdateMovie();
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [notifyingMovieId, setNotifyingMovieId] = useState<number | null>(null);
+  const [botOkMovieId, setBotOkMovieId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [editingMovie, setEditingMovie] = useState<any>(null);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -481,6 +482,23 @@ export default function AdminMovies() {
     }
   };
 
+  const handleBotOk = async (movie: any) => {
+    setBotOkMovieId(movie.id);
+    try {
+      const res = await fetch(`/api/admin/movies/${movie.id}/bot-ok`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: "🤖 Bot OK sent!", description: `${movie.title} card sent to your admin chat.` });
+      } else {
+        toast({ title: "Bot OK failed", description: data.message || "Could not send. Check admin chat ID in Settings.", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setBotOkMovieId(null);
+    }
+  };
+
   const totalPages = data ? Math.max(1, Math.ceil((data.total || 0) / PER_PAGE)) : 1;
 
   const handleSearchChange = (val: string) => {
@@ -508,6 +526,7 @@ export default function AdminMovies() {
       title: "",
       overview: "",
       posterPath: "",
+      posterUrl: "",
       genre: "",
       releaseDate: "",
       tmdbId: undefined,
@@ -599,6 +618,7 @@ export default function AdminMovies() {
       isAdult: movie.isAdult || false,
       contentRating: movie.contentRating || "none",
       streamUrl: movie.streamUrl || "",
+      posterUrl: movie.posterUrl || "",
     });
     setQualityUrlsList(
       Array.isArray(movie.qualityUrls)
@@ -995,6 +1015,32 @@ export default function AdminMovies() {
                       )}
                     />
 
+                    {/* Custom Poster URL */}
+                    <FormField
+                      control={form.control}
+                      name="posterUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Info className="w-4 h-4 text-purple-400" /> Custom Poster URL
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              value={field.value || ""}
+                              placeholder="https://example.com/poster.jpg  (overrides TMDB poster)"
+                              className="bg-purple-500/5 border-purple-500/20 font-mono text-xs"
+                              data-testid="input-poster-url"
+                            />
+                          </FormControl>
+                          <FormDescription className="text-[10px]">
+                            Direct image URL sent by the bot instead of TMDB poster. Leave blank to use TMDB.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
                     {/* Multi-Quality Stream Sources */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -1228,6 +1274,21 @@ export default function AdminMovies() {
                         {postingChannelId === movie.id
                           ? <Loader2 className="w-4 h-4 animate-spin" />
                           : <Send className="w-4 h-4" />
+                        }
+                      </Button>
+                      {/* Bot OK — preview in admin chat */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-muted-foreground hover:text-purple-400 hover:bg-purple-400/10"
+                        title="Bot OK — send preview to admin chat"
+                        onClick={() => handleBotOk(movie)}
+                        disabled={botOkMovieId === movie.id}
+                        data-testid={`button-bot-ok-${movie.id}`}
+                      >
+                        {botOkMovieId === movie.id
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <CheckCircle2 className="w-4 h-4" />
                         }
                       </Button>
                       {/* Notify all users */}

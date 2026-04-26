@@ -27,6 +27,7 @@ import ServerStatsPage from "@/pages/admin/ServerStats";
 import TikTokDashboard from "@/pages/admin/TikTokDashboard";
 import TikTokEditor from "@/pages/admin/TikTokEditor";
 import BroadcastPage from "@/pages/admin/Broadcast";
+import HowToUsePage from "@/pages/admin/HowToUse";
 
 // Mini App Pages
 import MovieView from "@/pages/app/MovieView";
@@ -99,6 +100,7 @@ function Router() {
       <Route path="/admin/tiktok">{() => <ProtectedRoute component={TikTokDashboard} />}</Route>
       <Route path="/admin/tiktok/editor/:id">{() => <ProtectedRoute component={TikTokEditor} />}</Route>
       <Route path="/admin/broadcast">{() => <ProtectedRoute component={BroadcastPage} />}</Route>
+      <Route path="/admin/how-to-use">{() => <ProtectedRoute component={HowToUsePage} />}</Route>
 
       {/* Mini App Routes */}
       <Route path="/app" component={Home} />

@@ -18,7 +18,7 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { generateAndSendTikTok, type MusicStyle } from "./tiktok-video";
-import { startBot, broadcastMovieNotification, broadcastEpisodeNotification, broadcastCustomMessage } from "./bot";
+import { startBot, broadcastMovieNotification, broadcastEpisodeNotification, broadcastCustomMessage, sendMovieCardPreview } from "./bot";
 import { seed } from "./seed";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
@@ -2882,6 +2882,34 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Bot OK: send movie card preview to admin chat ─────────────────────────
+  app.post("/api/admin/movies/:id/bot-ok", requireAdmin, async (req, res) => {
+    try {
+      const movieId = Number(req.params.id);
+      const s = await storage.getSettings();
+      const adminChatId = s?.tiktokAdminChatId?.trim();
+      if (!adminChatId) {
+        return res.status(400).json({ ok: false, message: "No admin chat ID configured. Please set TikTok Admin Chat ID in Settings to use Bot OK." });
+      }
+      const result = await sendMovieCardPreview(movieId, Number(adminChatId));
+      if (!result.ok) return res.status(400).json(result);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
+  // ─── Public: How To Use items ──────────────────────────────────────────────
+  app.get("/api/public/how-to-use", async (_req, res) => {
+    try {
+      const s = await storage.getSettings();
+      const items = (s as any)?.howToUseItems || [];
+      res.json(items);
+    } catch (e: any) {
+      res.status(500).json([]);
+    }
+  });
+
   // ─── Database Export ──────────────────────────────────────────────────────
   app.get("/api/db/export", async (_req, res) => {
     try {
@@ -3482,6 +3510,18 @@ export async function registerRoutes(
   app.get("/api/public/banner-ad", async (_req, res) => {
     const s = await storage.getSettings();
     res.json({ code: s?.bannerAdCode || "", enabled: s?.bannerAdEnabled ?? false });
+  });
+
+  app.get("/api/public/telegaio-ad", async (_req, res) => {
+    const s = await storage.getSettings();
+    res.json({
+      script: s?.telegaioScript || "",
+      enabled: s?.telegaioEnabled ?? false,
+      fullscreenEnabled: s?.telegaioFullscreenEnabled ?? false,
+      rewardEnabled: s?.telegaioRewardEnabled ?? false,
+      rewardToken: s?.telegaioRewardToken || "",
+      rewardAdBlockUuid: s?.telegaioRewardAdBlockUuid || "",
+    });
   });
 
   return httpServer;

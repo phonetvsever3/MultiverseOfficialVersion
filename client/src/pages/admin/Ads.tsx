@@ -196,6 +196,171 @@ function BannerAdSettings() {
   );
 }
 
+function TelegaioAdSettings() {
+  const { toast } = useToast();
+  const { data: settings, isLoading } = useQuery<Settings>({ queryKey: ["/api/settings"], staleTime: 30000 });
+  const [script, setScript] = useState("");
+  const [enabled, setEnabled] = useState(false);
+  const [fullscreenEnabled, setFullscreenEnabled] = useState(false);
+  const [rewardEnabled, setRewardEnabled] = useState(false);
+  const [rewardToken, setRewardToken] = useState("");
+  const [rewardAdBlockUuid, setRewardAdBlockUuid] = useState("");
+
+  useEffect(() => {
+    if (settings) {
+      setScript((settings as any).telegaioScript || "");
+      setEnabled((settings as any).telegaioEnabled ?? false);
+      setFullscreenEnabled((settings as any).telegaioFullscreenEnabled ?? false);
+      setRewardEnabled((settings as any).telegaioRewardEnabled ?? false);
+      setRewardToken((settings as any).telegaioRewardToken || "");
+      setRewardAdBlockUuid((settings as any).telegaioRewardAdBlockUuid || "");
+    }
+  }, [settings]);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings", {
+        telegaioScript: script,
+        telegaioEnabled: enabled,
+        telegaioFullscreenEnabled: fullscreenEnabled,
+        telegaioRewardEnabled: rewardEnabled,
+        telegaioRewardToken: rewardToken,
+        telegaioRewardAdBlockUuid: rewardAdBlockUuid,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/public/telegaio-ad"] });
+      toast({ title: "Telega.io Ad settings saved" });
+    },
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  if (isLoading) return null;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 mb-8">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <MonitorPlay className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <h2 className="font-bold text-foreground">Telega.io Ad Settings</h2>
+          <p className="text-xs text-muted-foreground">Native Telegram ad network — banner on detail pages + optional fullscreen interstitial rotation</p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
+            <div>
+              <div className="text-sm font-medium text-foreground">Enable Banner</div>
+              <div className="text-xs text-muted-foreground">Show telega.io banner on movie &amp; series pages</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnabled(!enabled)}
+              className="transition-all active:scale-95"
+              data-testid="toggle-telegaio-enabled"
+            >
+              {enabled
+                ? <ToggleRight className="w-8 h-8 text-primary" />
+                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+              }
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
+            <div>
+              <div className="text-sm font-medium text-foreground">Enable Fullscreen</div>
+              <div className="text-xs text-muted-foreground">Rotate telega.io 50/50 with Smart Link as fullscreen ad</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFullscreenEnabled(!fullscreenEnabled)}
+              className="transition-all active:scale-95"
+              data-testid="toggle-telegaio-fullscreen-enabled"
+            >
+              {fullscreenEnabled
+                ? <ToggleRight className="w-8 h-8 text-primary" />
+                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+              }
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Code className="w-3.5 h-3.5 text-muted-foreground" /> Telega.io Embed Script
+          </label>
+          <Textarea
+            value={script}
+            onChange={(e) => setScript(e.target.value)}
+            placeholder={`<script src="https://telega.io/js/widget.js" data-id="YOUR_ID" async></script>`}
+            className="font-mono text-xs min-h-[100px] resize-none"
+          />
+          <p className="text-xs text-muted-foreground">Paste the full embed script from your telega.io dashboard. It runs inside a sandboxed iframe on movie/series pages.</p>
+        </div>
+
+        {/* Reward Ad (inapp SDK) */}
+        <div className="border border-border/60 rounded-xl p-4 space-y-4 bg-black/10">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-foreground">Reward Ad (inapp SDK)</div>
+              <div className="text-xs text-muted-foreground">Show a reward ad via telega.io inapp SDK before Watch / Download — rotates with Smart Link &amp; fullscreen</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRewardEnabled(!rewardEnabled)}
+              className="transition-all active:scale-95"
+              data-testid="toggle-telegaio-reward-enabled"
+            >
+              {rewardEnabled
+                ? <ToggleRight className="w-8 h-8 text-primary" />
+                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+              }
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">App Token</label>
+              <Input
+                value={rewardToken}
+                onChange={(e) => setRewardToken(e.target.value)}
+                placeholder="76648bcb-b3b9-4839-8b48-ad1398c1cdd8"
+                className="font-mono text-xs"
+                data-testid="input-telegaio-reward-token"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Ad Block UUID</label>
+              <Input
+                value={rewardAdBlockUuid}
+                onChange={(e) => setRewardAdBlockUuid(e.target.value)}
+                placeholder="a820081b-183e-456d-8498-baa16efd9b64"
+                className="font-mono text-xs"
+                data-testid="input-telegaio-reward-uuid"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Find your token and ad block UUID in your telega.io dashboard → Mini App → Reward Ads.</p>
+        </div>
+
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="gap-2"
+        >
+          {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Telega.io Settings
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function FileUploadField({
   label,
   accept,
@@ -572,6 +737,7 @@ export default function AdminAds() {
 
         <SmartLinkSettings />
         <BannerAdSettings />
+        <TelegaioAdSettings />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
            {isLoading ? <div>Loading ads...</div> : ads?.map((ad) => (

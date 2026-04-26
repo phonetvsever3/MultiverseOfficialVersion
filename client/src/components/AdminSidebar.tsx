@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity, Video, Megaphone } from "lucide-react";
+import { LayoutDashboard, Film, MonitorPlay, Tv, Settings, BarChart3, Cloud, Sparkles, Trophy, LogOut, Link2, Users, Zap, GitFork, Activity, Video, Megaphone, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -20,6 +20,7 @@ const navigation = [
   { name: 'Football', href: '/admin/football', icon: Trophy },
   { name: 'Mascot', href: '/admin/mascot', icon: Sparkles },
   { name: 'GitHub Backup', href: '/admin/backup', icon: Cloud },
+  { name: 'How To Use', href: '/admin/how-to-use', icon: HelpCircle },
   { name: 'Settings', href: '/admin/settings', icon: Settings },
 ];
 

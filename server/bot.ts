@@ -107,8 +107,7 @@ function buildKeyboard(webAppUrl: string) {
     keyboard: [
       [{ text: "🌐 Open App", web_app: { url: webAppUrl } }],
       [{ text: "🎬 Movies" }, { text: "📺 Series" }],
-      [{ text: "🔥 Trending" }, { text: "⭐️ Top Rated" }],
-      [{ text: "🔎 Search" }, { text: "🆕 Latest" }],
+      [{ text: "🔎 Search" }, { text: "❓ How to Use" }],
     ],
     resize_keyboard: true,
     persistent: true,
@@ -118,8 +117,7 @@ function buildKeyboard(webAppUrl: string) {
 const FALLBACK_KEYBOARD = {
   keyboard: [
     [{ text: "🎬 Movies" }, { text: "📺 Series" }],
-    [{ text: "🔥 Trending" }, { text: "⭐️ Top Rated" }],
-    [{ text: "🔎 Search" }, { text: "🆕 Latest" }],
+    [{ text: "🔎 Search" }, { text: "❓ How to Use" }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -338,38 +336,24 @@ export async function startBot() {
       ? { inline_keyboard: [[{ text: "▶️ Watch in App", url: webAppUrl }]] }
       : undefined;
 
-    // 1. If movie has a valid file — send file first, then Watch button as follow-up
+    // Always show info card (poster + info + watch/download buttons) — never send the file directly from here
     const hasFile = movie.fileId && movie.fileId !== 'placeholder_file_id';
-    if (hasFile) {
-      const fileCaption = `✅ *${movie.title}*\nQuality: ${movie.quality || 'HD'}\n\nEnjoy! 🎬`;
-      let fileSent = false;
-      try {
-        await botInstance?.sendVideo(chatId, movie.fileId, { caption: fileCaption, parse_mode: 'Markdown' });
-        fileSent = true;
-      } catch (ev: any) {
-        console.error(`[Bot] sendMovieCard sendVideo ${movie.id}:`, ev?.message);
-        try {
-          await botInstance?.sendDocument(chatId, movie.fileId, { caption: fileCaption, parse_mode: 'Markdown' });
-          fileSent = true;
-        } catch (ed: any) {
-          console.error(`[Bot] sendMovieCard sendDocument ${movie.id}:`, ed?.message);
-        }
-      }
-      if (fileSent) {
-        await storage.incrementMovieViews(movie.id);
-        // Send Watch button as separate follow-up
-        if (webAppUrl) {
-          try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: webAppKeyboard }); }
-          catch { try { await botInstance?.sendMessage(chatId, '▶️', { reply_markup: urlFallbackKeyboard }); } catch {} }
-        }
-        return;
-      }
-    }
+    let botUsername = '';
+    try { const me = await botInstance?.getMe(); botUsername = me?.username || ''; } catch {}
+    const downloadKeyboard = hasFile && webAppUrl && botUsername
+      ? { inline_keyboard: [[
+          { text: "▶️ Watch in App", web_app: { url: webAppUrl } },
+          { text: "📥 Download", url: `https://t.me/${botUsername}?start=dl_${movie.id}` },
+        ]] }
+      : webAppKeyboard;
 
-    // 2. No file (or file send failed) — send poster photo with full info caption + Watch button
+    // Send poster photo with full info caption + Watch/Download buttons
     async function trySendPoster(keyboard: any) {
-      if (movie.posterPath) {
-        const posterUrl = `https://image.tmdb.org/t/p/w342${movie.posterPath}`;
+      const posterUrl = (movie as any).posterUrl ||
+        (movie.posterPath
+          ? (movie.posterPath.startsWith('http') ? movie.posterPath : `https://image.tmdb.org/t/p/w342${movie.posterPath}`)
+          : null);
+      if (posterUrl) {
         try {
           await botInstance?.sendPhoto(chatId, posterUrl, {
             caption: fullCaption, parse_mode: 'Markdown', reply_markup: keyboard,
@@ -387,7 +371,8 @@ export async function startBot() {
     }
 
     // Try web_app button (no ↗); fallback to url button in groups
-    if (!await trySendPoster(webAppKeyboard)) {
+    const chosenKeyboard = downloadKeyboard || webAppKeyboard;
+    if (!await trySendPoster(chosenKeyboard)) {
       await trySendPoster(urlFallbackKeyboard);
     }
   }
@@ -859,16 +844,20 @@ export async function startBot() {
       await sendMovieList(chatId, items, "📺 Series");
       return;
     }
-    if (text === "🔥 Trending") {
-      const { items } = await storage.getMovies({ limit: 20 });
-      const sorted = [...items].sort((a, b) => (b.views || 0) - (a.views || 0));
-      await sendMovieList(chatId, sorted.slice(0, 8), "🔥 Trending");
-      return;
-    }
-    if (text === "⭐️ Top Rated") {
-      const { items } = await storage.getMovies({ limit: 100 });
-      const sorted = [...items].sort((a, b) => (b.rating || 0) - (a.rating || 0)).filter(m => (m.rating || 0) > 0);
-      await sendMovieList(chatId, sorted.slice(0, 8), "⭐️ Top Rated");
+    if (text === "❓ How to Use") {
+      const s = await storage.getSettings();
+      const items = (s as any)?.howToUseItems as Array<{ title: string; url: string }> | undefined;
+      const kb = await getMainKeyboard();
+      if (!items || items.length === 0) {
+        if (botInstance) await sendWithKeyboard(botInstance, chatId,
+          "ℹ️ *How to Use*\n\nNo guides have been set up yet. Please check back later.",
+          { parse_mode: 'Markdown' }, kb);
+        return;
+      }
+      const inlineButtons = items.map(item => [{ text: `📖 ${item.title}`, url: item.url }]);
+      if (botInstance) await botInstance.sendMessage(chatId,
+        "❓ *How to Use*\n\nTap any link below to view the guide:",
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineButtons } });
       return;
     }
     if (text === "🔎 Search") {
@@ -876,11 +865,6 @@ export async function startBot() {
       if (botInstance) await sendWithKeyboard(botInstance, chatId,
         "🔎 *Search*\n\nJust type the movie or series name, actor, or genre and I'll find it!\n\nExamples:\n`Oppenheimer`\n`Action`\n`Jason Statham`",
         { parse_mode: 'Markdown' }, kb);
-      return;
-    }
-    if (text === "🆕 Latest") {
-      const { items } = await storage.getMovies({ limit: 8 });
-      await sendMovieList(chatId, items, "🆕 Latest Additions");
       return;
     }
 
@@ -982,6 +966,20 @@ export function getBotInstance(): TelegramBot | null {
   return botInstance;
 }
 
+/**
+ * Sends a movie/series info card to the given chatId via the bot.
+ * Used by the admin "Bot OK" button to preview how the card looks.
+ */
+export async function sendMovieCardPreview(movieId: number, chatId: number): Promise<{ ok: boolean; message?: string }> {
+  if (!botInstance) return { ok: false, message: "Bot not running" };
+  try {
+    await sendMovieCard(chatId, movieId);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, message: e.message };
+  }
+}
+
 export async function stopBot(): Promise<void> {
   if (botInstance) {
     try {
@@ -1028,11 +1026,9 @@ export async function broadcastMovieNotification(movie: any): Promise<{ sent: nu
     overview,
   ].join('\n');
 
-  // Use regular URL button — works in both private chats and groups
-  const buttons: any[] = [];
-  if (webAppUrl) {
-    buttons.push({ text: "▶️ Watch / Download", url: webAppUrl });
-  }
+  // Use web_app button so Telegram opens the mini app directly (no "Open this link?" dialog)
+  const webAppBtn = webAppUrl ? { text: "▶️ Watch / Download", web_app: { url: webAppUrl } } : null;
+  const urlFallbackBtn = webAppUrl ? { text: "▶️ Watch / Download", url: webAppUrl } : null;
 
   let sent = 0;
   let failed = 0;
@@ -1042,22 +1038,34 @@ export async function broadcastMovieNotification(movie: any): Promise<{ sent: nu
       const chatId = parseInt(user.telegramId);
       if (isNaN(chatId)) { failed++; continue; }
 
-      if (movie.posterPath) {
+      const posterUrl = movie.posterPath ? `https://image.tmdb.org/t/p/w342${movie.posterPath}` : null;
+
+      // Try web_app button (opens mini app inline, no URL dialog)
+      let succeeded = false;
+      if (webAppBtn) {
+        const markup = { inline_keyboard: [[webAppBtn]] };
         try {
-          await instance.sendPhoto(chatId, `https://image.tmdb.org/t/p/w342${movie.posterPath}`, {
-            caption,
-            parse_mode: 'Markdown',
-            reply_markup: buttons.length ? { inline_keyboard: [buttons] } : undefined,
-          });
-          sent++;
-          continue;
+          if (posterUrl) {
+            await instance.sendPhoto(chatId, posterUrl, { caption, parse_mode: 'Markdown', reply_markup: markup });
+          } else {
+            await instance.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: markup });
+          }
+          succeeded = true;
         } catch {}
       }
-      await instance.sendMessage(chatId, caption, {
-        parse_mode: 'Markdown',
-        reply_markup: buttons.length ? { inline_keyboard: [buttons] } : undefined,
-      });
-      sent++;
+      // Fallback to url button if web_app fails (e.g. in groups)
+      if (!succeeded && urlFallbackBtn) {
+        const markup = { inline_keyboard: [[urlFallbackBtn]] };
+        try {
+          if (posterUrl) {
+            await instance.sendPhoto(chatId, posterUrl, { caption, parse_mode: 'Markdown', reply_markup: markup });
+          } else {
+            await instance.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: markup });
+          }
+          succeeded = true;
+        } catch {}
+      }
+      if (succeeded) sent++; else failed++;
     } catch {
       failed++;
     }
@@ -1089,11 +1097,9 @@ export async function broadcastEpisodeNotification(episode: any, series: any): P
     ...(epOverview ? [``, epOverview] : []),
   ].join('\n');
 
-  // Use regular URL button — works in both private chats and groups
-  const buttons: any[] = [];
-  if (webAppUrl) {
-    buttons.push({ text: "▶️ Watch Series", url: webAppUrl });
-  }
+  // Use web_app button so Telegram opens the mini app directly (no "Open this link?" dialog)
+  const webAppBtn = webAppUrl ? { text: "▶️ Watch Series", web_app: { url: webAppUrl } } : null;
+  const urlFallbackBtn = webAppUrl ? { text: "▶️ Watch Series", url: webAppUrl } : null;
 
   let sent = 0;
   let failed = 0;
@@ -1103,22 +1109,32 @@ export async function broadcastEpisodeNotification(episode: any, series: any): P
       const chatId = parseInt(user.telegramId);
       if (isNaN(chatId)) { failed++; continue; }
 
-      if (series.posterPath) {
+      const posterUrl = series.posterPath ? `https://image.tmdb.org/t/p/w342${series.posterPath}` : null;
+      let succeeded = false;
+
+      if (webAppBtn) {
+        const markup = { inline_keyboard: [[webAppBtn]] };
         try {
-          await instance.sendPhoto(chatId, `https://image.tmdb.org/t/p/w342${series.posterPath}`, {
-            caption,
-            parse_mode: 'Markdown',
-            reply_markup: buttons.length ? { inline_keyboard: [buttons] } : undefined,
-          });
-          sent++;
-          continue;
+          if (posterUrl) {
+            await instance.sendPhoto(chatId, posterUrl, { caption, parse_mode: 'Markdown', reply_markup: markup });
+          } else {
+            await instance.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: markup });
+          }
+          succeeded = true;
         } catch {}
       }
-      await instance.sendMessage(chatId, caption, {
-        parse_mode: 'Markdown',
-        reply_markup: buttons.length ? { inline_keyboard: [buttons] } : undefined,
-      });
-      sent++;
+      if (!succeeded && urlFallbackBtn) {
+        const markup = { inline_keyboard: [[urlFallbackBtn]] };
+        try {
+          if (posterUrl) {
+            await instance.sendPhoto(chatId, posterUrl, { caption, parse_mode: 'Markdown', reply_markup: markup });
+          } else {
+            await instance.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: markup });
+          }
+          succeeded = true;
+        } catch {}
+      }
+      if (succeeded) sent++; else failed++;
     } catch {
       failed++;
     }

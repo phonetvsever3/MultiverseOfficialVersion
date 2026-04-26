@@ -7,6 +7,7 @@ import { type Episode, type Movie } from "@shared/schema";
 import { addToWatchHistory } from "@/lib/watch-history";
 import { isInWatchlist, toggleWatchlist } from "@/lib/watchlist";
 import { SmartLinkAdBox } from "@/components/SmartLinkAdBox";
+import { TelegaioAdBanner, TelegaioFullscreenAd } from "@/components/TelegaioAd";
 import { motion } from "framer-motion";
 
 const tg = (window as any).Telegram?.WebApp;
@@ -71,6 +72,12 @@ export default function MovieView() {
     staleTime: 60000,
   });
 
+  const { data: telegaioConfig } = useQuery<{ script: string; enabled: boolean; fullscreenEnabled: boolean; rewardEnabled: boolean; rewardToken: string; rewardAdBlockUuid: string }>({
+    queryKey: ["/api/public/telegaio-ad"],
+    staleTime: 60000,
+  });
+  const [showTelegaioFs, setShowTelegaioFs] = useState(false);
+
   const { data: episodes } = useQuery<Episode[]>({
     queryKey: [`/api/movies/${movieId}/episodes`],
     enabled: !!movie && movie.type === "series",
@@ -100,14 +107,49 @@ export default function MovieView() {
     if (tg) { tg.ready(); tg.expand(); tg.MainButton.hide(); }
   }, []);
 
+  const showRewardAd = useCallback(async (token: string, adBlockUuid: string, callback: () => void) => {
+    try {
+      const TelegaIn = (window as any).TelegaIn;
+      if (!TelegaIn?.AdsController) { callback(); return; }
+      if (!(window as any).__telegaInAds) {
+        (window as any).__telegaInAds = TelegaIn.AdsController.create_miniapp({ token });
+      }
+      const ads = (window as any).__telegaInAds;
+      await ads.ad_show({ adBlockUuid });
+    } catch {
+      // If ad fails or is skipped, still proceed
+    } finally {
+      callback();
+    }
+  }, []);
+
   const triggerAction = useCallback((mode: "watch" | "download", action: () => void) => {
     const config = smartLinkConfig || { url: "", countdown: 5, interval: 0 };
-    if (shouldShowAd(config)) {
+    const hasTelegaioFs = telegaioConfig?.fullscreenEnabled && !!telegaioConfig?.script;
+    const hasSmartLink = shouldShowAd(config);
+    const hasReward = !!(telegaioConfig?.rewardEnabled && telegaioConfig?.rewardToken && telegaioConfig?.rewardAdBlockUuid);
+
+    // Build the pool of available ad slots
+    const pool: Array<"smartlink" | "telegaio_fs" | "reward"> = [];
+    if (hasSmartLink) pool.push("smartlink");
+    if (hasTelegaioFs) pool.push("telegaio_fs");
+    if (hasReward) pool.push("reward");
+
+    if (pool.length === 0) { action(); return; }
+
+    // Pick randomly from pool
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+
+    if (picked === "smartlink") {
       setAdBox({ mode, action });
+    } else if (picked === "telegaio_fs") {
+      setShowTelegaioFs(true);
+      (window as any).__telegaioAdAction = action;
     } else {
-      action();
+      // Reward ad — async, proceed after completion
+      showRewardAd(telegaioConfig!.rewardToken, telegaioConfig!.rewardAdBlockUuid, action);
     }
-  }, [smartLinkConfig]);
+  }, [smartLinkConfig, telegaioConfig, showRewardAd]);
 
   const handleAdProceed = () => {
     recordAdSeen();
@@ -303,6 +345,13 @@ export default function MovieView() {
               scrolling="no"
             />
           </div>
+        </div>
+      )}
+
+      {/* ── Telega.io Banner Ad ── */}
+      {telegaioConfig?.enabled && telegaioConfig?.script && (
+        <div className="px-5 pt-4" data-testid="telegaio-banner-ad">
+          <TelegaioAdBanner script={telegaioConfig.script} />
         </div>
       )}
 
@@ -594,6 +643,21 @@ export default function MovieView() {
           mode={adBox.mode}
           onProceed={handleAdProceed}
           onClose={() => setAdBox(null)}
+        />
+      )}
+
+      {/* ── Telega.io Fullscreen Interstitial ── */}
+      {showTelegaioFs && telegaioConfig?.script && (
+        <TelegaioFullscreenAd
+          script={telegaioConfig.script}
+          onClose={() => {
+            setShowTelegaioFs(false);
+            const pendingAction = (window as any).__telegaioAdAction;
+            if (pendingAction) {
+              (window as any).__telegaioAdAction = null;
+              setTimeout(pendingAction, 50);
+            }
+          }}
         />
       )}
     </div>

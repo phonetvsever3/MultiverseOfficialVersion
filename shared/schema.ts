@@ -33,6 +33,7 @@ export const movies = pgTable("movies", {
   streamUrl: text("stream_url"), // TG-FileStreamBot stream URL
   qualityUrls: jsonb("quality_urls"), // [{label:"1080p",url:"...",type:"mp4"|"hls"}]
   trailerUrl: text("trailer_url"), // Custom trailer URL (YouTube link or direct video)
+  posterUrl: text("poster_url"), // Custom direct poster image URL (overrides TMDB posterPath)
   isAdult: boolean("is_adult").default(false),
   contentRating: text("content_rating"), // e.g. "18+", "21+", "Erotic", "Adult"
   createdAt: timestamp("created_at").defaultNow(),
@@ -154,6 +155,13 @@ export const settings = pgTable("settings", {
   bannerAdUrl: text("banner_ad_url"),
   bannerAdEnabled: boolean("banner_ad_enabled").default(false),
   bannerAdCode: text("banner_ad_code"),
+  telegaioScript: text("telegaio_script"),
+  telegaioEnabled: boolean("telegaio_enabled").default(false),
+  telegaioFullscreenEnabled: boolean("telegaio_fullscreen_enabled").default(false),
+  telegaioRewardEnabled: boolean("telegaio_reward_enabled").default(false),
+  telegaioRewardToken: text("telegaio_reward_token"),
+  telegaioRewardAdBlockUuid: text("telegaio_reward_ad_block_uuid"),
+  howToUseItems: jsonb("how_to_use_items").$type<Array<{ title: string; url: string }>>().default([]),
 });
 
 // Mascot Settings
