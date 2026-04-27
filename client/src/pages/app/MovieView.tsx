@@ -181,7 +181,6 @@ export default function MovieView() {
         const idToSend = episode ? `ep_${episode.id}` : movieId;
         const deepLink = `https://t.me/MultiverseMovies_Bot?start=${idToSend}`;
         if (tg) {
-          try { tg.sendData(String(episode ? episode.id : movieId)); } catch {}
           tg.openTelegramLink(deepLink);
         } else {
           window.open(deepLink, "_blank");

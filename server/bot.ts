@@ -754,10 +754,25 @@ export async function startBot() {
 
     await trackUser(msg.from);
 
-    // WebApp data
+    // WebApp data (sendData from mini-app)
     const webAppData = msg.web_app_data?.data;
     if (webAppData) {
       console.log(`[Bot] WebApp data: "${webAppData}" from Chat ${chatId}`);
+      // ep_ prefix → episode delivery
+      if (webAppData.startsWith('ep_')) {
+        const epId = parseInt(webAppData.replace('ep_', ''));
+        if (!isNaN(epId)) { await handleEpisodeDownload(chatId, epId); return; }
+      }
+      // movie_ / series_ → card only
+      if (webAppData.startsWith('movie_') || webAppData.startsWith('series_')) {
+        const id = parseInt(webAppData.replace(/^(movie_|series_)/, ''));
+        if (!isNaN(id)) {
+          const m = await storage.getMovie(id);
+          if (m) await sendMovieCard(chatId, m);
+          return;
+        }
+      }
+      // plain number → movie delivery
       const id = parseInt(webAppData);
       if (!isNaN(id)) {
         await handleMovieDownload(chatId, id);
