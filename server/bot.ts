@@ -405,23 +405,17 @@ export async function startBot() {
     }
 
     async function trySendFile(fileId: string, caption: string): Promise<'ok' | 'invalid' | 'fail'> {
-      for (const send of ['video', 'document'] as const) {
-        try {
-          if (send === 'video') {
-            await botInstance?.sendVideo(chatId, fileId, { caption, parse_mode: 'Markdown' });
-          } else {
-            await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
-          }
-          return 'ok';
-        } catch (e: any) {
-          const msg = e?.message || String(e);
-          console.error(`[Bot] send${send === 'video' ? 'Video' : 'Document'} failed:`, msg);
-          if (msg.includes('wrong remote file identifier') || msg.includes('WRONG_FILE_ID')) {
-            return 'invalid';
-          }
+      try {
+        await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
+        return 'ok';
+      } catch (e: any) {
+        const msg = e?.message || String(e);
+        console.error(`[Bot] sendDocument (episode) failed:`, msg);
+        if (msg.includes('wrong remote file identifier') || msg.includes('WRONG_FILE_ID')) {
+          return 'invalid';
         }
+        return 'fail';
       }
-      return 'fail';
     }
 
     const episode = await storage.getEpisode(epId);
@@ -498,26 +492,19 @@ export async function startBot() {
       };
     }
 
-    // Helper: try sendVideo then sendDocument, return true if success, error string if invalid file ID
+    // Send via sendDocument only — avoids double-send from video→document fallthrough on timeout.
     async function trySendFile(fileId: string, caption: string): Promise<'ok' | 'invalid' | 'fail'> {
-      let lastErr = '';
-      for (const send of ['video', 'document'] as const) {
-        try {
-          if (send === 'video') {
-            await botInstance?.sendVideo(chatId, fileId, { caption, parse_mode: 'Markdown' });
-          } else {
-            await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
-          }
-          return 'ok';
-        } catch (e: any) {
-          lastErr = e?.message || String(e);
-          console.error(`[Bot] send${send === 'video' ? 'Video' : 'Document'} failed:`, lastErr);
-          if (lastErr.includes('wrong remote file identifier') || lastErr.includes('WRONG_FILE_ID')) {
-            return 'invalid'; // Bad file ID — stop retrying
-          }
+      try {
+        await botInstance?.sendDocument(chatId, fileId, { caption, parse_mode: 'Markdown' });
+        return 'ok';
+      } catch (e: any) {
+        const lastErr = e?.message || String(e);
+        console.error(`[Bot] sendDocument (movie) failed:`, lastErr);
+        if (lastErr.includes('wrong remote file identifier') || lastErr.includes('WRONG_FILE_ID')) {
+          return 'invalid';
         }
+        return 'fail';
       }
-      return 'fail';
     }
 
     async function sendWatchButton(_streamUrl: string | null) {
@@ -606,73 +593,18 @@ export async function startBot() {
           }
         } catch {}
       }
-    }
 
-    const episode = await storage.getEpisode(id);
-    if (episode) {
-      try {
-        const parent = await storage.getMovie(episode.movieId);
-        const streamUrl = buildStreamWebAppUrl("episode", episode.id);
-        const s = String(episode.seasonNumber ?? 1).padStart(2, '0');
-        const e = String(episode.episodeNumber ?? 1).padStart(2, '0');
-        const caption = `✅ *${parent?.title || 'Series'}*\nS${s}E${e}${episode.title ? `: ${episode.title}` : ''}\n\nEnjoy! 🎬`;
-
-        // 1. Try stored episode fileId directly
-        if (episode.fileId) {
-          const result = await trySendFile(episode.fileId, caption);
-          if (result === 'ok') {
-            await sendWatchButton(streamUrl);
-            return;
-          }
-        }
-
-        // 2. Try lookup via fileUniqueId in syncedFiles
-        if (episode.fileUniqueId) {
-          const sf = await storage.getSyncedFileByUniqueId(episode.fileUniqueId);
-          if (sf?.fileId) {
-            const result2 = await trySendFile(sf.fileId, caption);
-            if (result2 === 'ok') {
-              try { await storage.updateEpisode(episode.id, { fileId: sf.fileId }); } catch {}
-              await sendWatchButton(streamUrl);
-              return;
-            }
-          }
-          // 3. Forward the original message via MTProto
-          const sfForward = await storage.getSyncedFileByUniqueId(episode.fileUniqueId).catch(() => null);
-          if (sfForward?.channelId && sfForward?.messageId) {
-            console.log(`[Bot] Forwarding episode ${episode.id} via MTProto from ch=${sfForward.channelId} msg=${sfForward.messageId}`);
-            const ok = await forwardFromBinViaMtproto(chatId, sfForward.channelId, sfForward.messageId);
-            if (ok) { await sendWatchButton(streamUrl); return; }
-          }
-        }
-
-        // Not deliverable — show watch-in-app message
-        const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
-        const watchUrl = domain && parent ? `https://${domain}/app/movie/${parent.id}` : null;
-        const msg = `⚠️ *${parent?.title || 'Series'}* S${s}E${e}\n\nဤ ဇာတ်ကဗျာဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
-        if (watchUrl) {
-          const kbs = makeKeyboard(watchUrl);
-          try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
-          catch { try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
-        } else {
-          await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
-        }
-        return;
-      } catch (e) {}
-    }
-
-    // File not deliverable — show clean "not available" message (never show poster card here)
-    const notFoundMovie = await storage.getMovie(id);
-    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
-    if (notFoundMovie) {
-      const watchUrl = domain ? `https://${domain}/app/movie/${notFoundMovie.id}` : null;
-      const msg = `⚠️ *${notFoundMovie.title}*\n\nဤ ရုပ်ရှင်ဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
+      // All delivery methods failed — show movie-specific "not available" message.
+      // NEVER fall through to episode lookup with the same numeric ID (would deliver wrong content).
+      const domain = process.env.REPLIT_DEV_DOMAIN || process.env.VITE_DEV_SERVER_HOSTNAME;
+      const watchUrl = domain ? `https://${domain}/app/movie/${movie.id}` : null;
+      const unavailableMsg = `⚠️ *${movie.title}*\n\nဤ ရုပ်ရှင်ဖိုင်ကို ဒေါင်းလုဒ်ဆွဲ၍မရသေးပါ ❌\nAdmin က မကြာမီ ပြင်ဆင်ပေးပါမည်။\n\nApp မှာ Streaming ကြည့်နိုင်ပါသည် 👇`;
       if (watchUrl) {
         const kbs = makeKeyboard(watchUrl);
-        try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
-        catch { try { await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
+        try { await botInstance?.sendMessage(chatId, unavailableMsg, { parse_mode: 'Markdown', reply_markup: kbs.webApp }); }
+        catch { try { await botInstance?.sendMessage(chatId, unavailableMsg, { parse_mode: 'Markdown', reply_markup: kbs.urlFallback }); } catch {} }
       } else {
-        await botInstance?.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        await botInstance?.sendMessage(chatId, unavailableMsg, { parse_mode: 'Markdown' });
       }
       return;
     }

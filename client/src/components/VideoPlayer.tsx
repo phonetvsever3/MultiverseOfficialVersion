@@ -427,21 +427,23 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     return () => clearTimeout(t);
   }, [loading, error]);
 
-  // Auto-fullscreen + landscape lock on player open
+  // Back button: show Telegram in-app back button; hardware back navigates naturally
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
-    if (tg?.requestFullscreen) {
-      try { tg.requestFullscreen(); } catch {}
+
+    if (tg?.BackButton) {
+      tg.BackButton.show();
+      tg.BackButton.onClick(onClose);
     }
-    lockLandscape();
+
     return () => {
-      const tg2 = (window as any).Telegram?.WebApp;
-      if (tg2?.exitFullscreen) {
-        try { tg2.exitFullscreen(); } catch {}
+      if (tg?.BackButton) {
+        tg.BackButton.offClick(onClose);
+        tg.BackButton.hide();
       }
       unlockOrientation();
     };
-  }, []);
+  }, [onClose]);
 
   // Fullscreen change & orientation detection
   useEffect(() => {

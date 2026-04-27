@@ -217,7 +217,7 @@ export default function MovieView() {
     );
   }
 
-  const poster = getPoster(movie.posterPath, "w780");
+  const poster = getPoster((movie as any).posterUrl || movie.posterPath, "w780");
   const customTrailerYouTubeId = movie.trailerUrl ? getYouTubeId(movie.trailerUrl) : null;
   const isCustomTrailerDirect = !!movie.trailerUrl && !customTrailerYouTubeId;
   const hasTrailer = !!(movie.trailerUrl || trailer);

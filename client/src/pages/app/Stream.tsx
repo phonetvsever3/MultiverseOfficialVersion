@@ -119,14 +119,13 @@ export default function Stream() {
       ? `${parentMovie?.title || "Series"} — S${episode.seasonNumber}E${episode.episodeNumber}${episode.title ? `: ${episode.title}` : ""}`
       : undefined;
 
-  const poster =
-    type === "movie"
-      ? movie?.posterPath
-        ? `https://image.tmdb.org/t/p/w780${movie.posterPath}`
-        : undefined
-      : parentMovie?.posterPath
-      ? `https://image.tmdb.org/t/p/w780${parentMovie.posterPath}`
-      : undefined;
+  function buildPoster(m: any): string | undefined {
+    if (!m) return undefined;
+    if (m.posterUrl) return m.posterUrl;
+    if (m.posterPath) return `https://image.tmdb.org/t/p/w780${m.posterPath}`;
+    return undefined;
+  }
+  const poster = type === "movie" ? buildPoster(movie) : buildPoster(parentMovie);
 
   // Build sources: prefer qualityUrls array from movie; always include base stream
   const sources: VideoSource[] = [];
@@ -185,8 +184,10 @@ export default function Stream() {
           title={title}
           saveProgressMovieId={type === "movie" ? id : episode?.movieId}
           onClose={() => {
-            if (window.history.length > 1) {
-              window.history.back();
+            if (type === "movie") {
+              setLocation(`/app/movie/${id}`);
+            } else if (episode?.movieId) {
+              setLocation(`/app/movie/${episode.movieId}`);
             } else {
               setLocation("/app");
             }
