@@ -1,72 +1,122 @@
+import { useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Timer } from "lucide-react";
+import { useState } from "react";
+
+interface TelegaioAdBannerProps {
+  script: string;
+  className?: string;
+}
+
 /**
- * Telega.io InApp SDK helpers.
- *
- * The SDK script is loaded once via the <script> tag in client/index.html.
- * It exposes `window.TelegaIn.AdsController.create_miniapp({ token })`, whose
- * instance has `ad_show({ adBlockUuid })`.
- *
- * IMPORTANT: telega.io's mini-app monetization only works inside Telegram.
- * The SDK posts `window.Telegram.WebApp.initData` to authenticate; outside
- * Telegram (e.g. a normal browser preview) initData is null and ads will not
- * load. Always test from the bot's menu button.
- *
- * There is no banner widget — every ad format goes through ad_show().
+ * Renders a telega.io banner ad by injecting the admin-configured script
+ * into a sandboxed iframe. Place on Movie/Series detail pages.
  */
+export function TelegaioAdBanner({ script, className = "" }: TelegaioAdBannerProps) {
+  if (!script) return null;
 
-function getAdsController(token: string) {
-  if (!token) return null;
-  const TelegaIn = (window as any).TelegaIn;
-  if (!TelegaIn?.AdsController?.create_miniapp) {
-    console.warn("[telega.io] SDK not loaded (TelegaIn missing). Are you online and inside Telegram?");
-    return null;
-  }
-  const cacheKey = `__telegaInAds_${token}`;
-  if (!(window as any)[cacheKey]) {
-    try {
-      (window as any)[cacheKey] = TelegaIn.AdsController.create_miniapp({ token });
-    } catch (e) {
-      console.error("[telega.io] create_miniapp failed:", e);
-      return null;
+  const srcDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box;overflow:hidden}body{background:transparent;display:flex;align-items:center;justify-content:center;width:100%;height:100%}</style></head><body>${script}</body></html>`;
+
+  return (
+    <div className={`w-full flex justify-center ${className}`}>
+      <iframe
+        srcDoc={srcDoc}
+        className="w-full border-0"
+        style={{ height: "60px", maxWidth: "360px" }}
+        title="Sponsored"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"
+        scrolling="no"
+      />
+    </div>
+  );
+}
+
+interface TelegaioFullscreenAdProps {
+  script: string;
+  onClose: () => void;
+}
+
+/**
+ * Renders a telega.io fullscreen interstitial ad. Shows a 5-second countdown
+ * before the user can close it.
+ */
+export function TelegaioFullscreenAd({ script, onClose }: TelegaioFullscreenAdProps) {
+  const [timeLeft, setTimeLeft] = useState(5);
+  const [canClose, setCanClose] = useState(false);
+  const hasRecorded = useRef(false);
+
+  useEffect(() => {
+    if (!hasRecorded.current) {
+      hasRecorded.current = true;
     }
-  }
-  return (window as any)[cacheKey];
-}
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setCanClose(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-export function isInsideTelegram(): boolean {
-  const tg = (window as any).Telegram?.WebApp;
-  return !!(tg && tg.initData && tg.initData.length > 0);
-}
+  const srcDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#000;display:flex;align-items:center;justify-content:center;width:100vw;height:100vh;overflow:hidden}</style></head><body>${script}</body></html>`;
 
-export function isTelegaioSdkLoaded(): boolean {
-  const TelegaIn = (window as any).TelegaIn;
-  return !!TelegaIn?.AdsController?.create_miniapp;
-}
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[200] flex flex-col bg-black"
+      >
+        {/* Top bar */}
+        <div className="relative z-10 flex items-center justify-between p-4 pt-safe bg-black/80">
+          <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-full px-4 py-2">
+            <span className="text-[10px] uppercase tracking-widest text-white/50 font-bold">Sponsored</span>
+          </div>
+          {canClose ? (
+            <motion.button
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              onClick={onClose}
+              className="w-11 h-11 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center active:scale-95 transition-all"
+            >
+              <X className="w-5 h-5 text-white" />
+            </motion.button>
+          ) : (
+            <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-md border border-white/10 flex items-center justify-center">
+              <div className="flex items-center gap-1">
+                <Timer className="w-3 h-3 text-white/60" />
+                <span className="text-[11px] font-bold text-white/80">{timeLeft}</span>
+              </div>
+            </div>
+          )}
+        </div>
 
-export async function showTelegaioAd(token: string, adBlockUuid: string): Promise<boolean> {
-  if (!token || !adBlockUuid) {
-    console.warn("[telega.io] Missing token or adBlockUuid — skipping ad.");
-    return false;
-  }
-  if (!isInsideTelegram()) {
-    console.warn(
-      "[telega.io] Not running inside Telegram (Telegram.WebApp.initData is empty). " +
-        "Telega.io ads only work when the mini app is opened from the bot's menu button. " +
-        "Open the app via your bot in Telegram to test ads."
-    );
-    return false;
-  }
-  const ads = getAdsController(token);
-  if (!ads?.ad_show) {
-    console.warn("[telega.io] AdsController unavailable — skipping ad.");
-    return false;
-  }
-  try {
-    console.log("[telega.io] ad_show start", { adBlockUuid });
-    await ads.ad_show({ adBlockUuid });
-    console.log("[telega.io] ad_show finished");
-    return true;
-  } catch (e) {
-    console.error("[telega.io] ad_show error:", e);
-    return false;
-  }
+        {/* Ad content */}
+        <div className="flex-1 relative">
+          <iframe
+            srcDoc={srcDoc}
+            className="w-full h-full border-0"
+            title="Sponsored"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"
+          />
+        </div>
+
+        {canClose && (
+          <div className="p-4 pb-safe bg-black/80">
+            <button
+              onClick={onClose}
+              className="w-full text-center text-[11px] text-white/40 hover:text-white/60 transition-colors py-2"
+            >
+              Close Ad
+            </button>
+          </div>
+        )}
+      </motion.div>
+    </AnimatePresence>
+  );
 }

@@ -7,7 +7,7 @@ import { type Episode, type Movie } from "@shared/schema";
 import { addToWatchHistory } from "@/lib/watch-history";
 import { isInWatchlist, toggleWatchlist } from "@/lib/watchlist";
 import { SmartLinkAdBox } from "@/components/SmartLinkAdBox";
-import { showTelegaioAd, isInsideTelegram } from "@/components/TelegaioAd";
+import { TelegaioAdBanner, TelegaioFullscreenAd } from "@/components/TelegaioAd";
 import { motion } from "framer-motion";
 
 const tg = (window as any).Telegram?.WebApp;
@@ -76,6 +76,7 @@ export default function MovieView() {
     queryKey: ["/api/public/telegaio-ad"],
     staleTime: 60000,
   });
+  const [showTelegaioFs, setShowTelegaioFs] = useState(false);
 
   const { data: episodes } = useQuery<Episode[]>({
     queryKey: [`/api/movies/${movieId}/episodes`],
@@ -106,9 +107,17 @@ export default function MovieView() {
     if (tg) { tg.ready(); tg.expand(); tg.MainButton.hide(); }
   }, []);
 
-  const showSdkAd = useCallback(async (token: string, adBlockUuid: string, callback: () => void) => {
+  const showRewardAd = useCallback(async (token: string, adBlockUuid: string, callback: () => void) => {
     try {
-      await showTelegaioAd(token, adBlockUuid);
+      const TelegaIn = (window as any).TelegaIn;
+      if (!TelegaIn?.AdsController) { callback(); return; }
+      if (!(window as any).__telegaInAds) {
+        (window as any).__telegaInAds = TelegaIn.AdsController.create_miniapp({ token });
+      }
+      const ads = (window as any).__telegaInAds;
+      await ads.ad_show({ adBlockUuid });
+    } catch {
+      // If ad fails or is skipped, still proceed
     } finally {
       callback();
     }
@@ -116,14 +125,9 @@ export default function MovieView() {
 
   const triggerAction = useCallback((mode: "watch" | "download", action: () => void) => {
     const config = smartLinkConfig || { url: "", countdown: 5, interval: 0 };
-    const hasSdkCreds = !!(telegaioConfig?.rewardToken && telegaioConfig?.rewardAdBlockUuid);
-    // Telega.io InApp SDK only works when launched inside Telegram (needs initData).
-    // Outside Telegram (regular browser preview) we exclude it from rotation so the
-    // user always falls back to the Smart Link ad instead of seeing nothing.
-    const inTelegram = isInsideTelegram();
-    const hasTelegaioFs = !!(telegaioConfig?.fullscreenEnabled && hasSdkCreds && inTelegram);
-    const hasReward = !!(telegaioConfig?.rewardEnabled && hasSdkCreds && inTelegram);
+    const hasTelegaioFs = telegaioConfig?.fullscreenEnabled && !!telegaioConfig?.script;
     const hasSmartLink = shouldShowAd(config);
+    const hasReward = !!(telegaioConfig?.rewardEnabled && telegaioConfig?.rewardToken && telegaioConfig?.rewardAdBlockUuid);
 
     // Build the pool of available ad slots
     const pool: Array<"smartlink" | "telegaio_fs" | "reward"> = [];
@@ -136,17 +140,16 @@ export default function MovieView() {
     // Pick randomly from pool
     const picked = pool[Math.floor(Math.random() * pool.length)];
 
-    console.log(
-      `[ad-rotation] mode=${mode} pool=[${pool.join(",")}] picked=${picked} inTelegram=${inTelegram}`
-    );
-
     if (picked === "smartlink") {
       setAdBox({ mode, action });
+    } else if (picked === "telegaio_fs") {
+      setShowTelegaioFs(true);
+      (window as any).__telegaioAdAction = action;
     } else {
-      // Both telegaio_fs and reward go through the same SDK ad_show call.
-      showSdkAd(telegaioConfig!.rewardToken, telegaioConfig!.rewardAdBlockUuid, action);
+      // Reward ad — async, proceed after completion
+      showRewardAd(telegaioConfig!.rewardToken, telegaioConfig!.rewardAdBlockUuid, action);
     }
-  }, [smartLinkConfig, telegaioConfig, showSdkAd]);
+  }, [smartLinkConfig, telegaioConfig, showRewardAd]);
 
   const handleAdProceed = () => {
     recordAdSeen();
@@ -341,6 +344,13 @@ export default function MovieView() {
               scrolling="no"
             />
           </div>
+        </div>
+      )}
+
+      {/* ── Telega.io Banner Ad ── */}
+      {telegaioConfig?.enabled && telegaioConfig?.script && (
+        <div className="px-5 pt-4" data-testid="telegaio-banner-ad">
+          <TelegaioAdBanner script={telegaioConfig.script} />
         </div>
       )}
 
@@ -635,6 +645,20 @@ export default function MovieView() {
         />
       )}
 
+      {/* ── Telega.io Fullscreen Interstitial ── */}
+      {showTelegaioFs && telegaioConfig?.script && (
+        <TelegaioFullscreenAd
+          script={telegaioConfig.script}
+          onClose={() => {
+            setShowTelegaioFs(false);
+            const pendingAction = (window as any).__telegaioAdAction;
+            if (pendingAction) {
+              (window as any).__telegaioAdAction = null;
+              setTimeout(pendingAction, 50);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
