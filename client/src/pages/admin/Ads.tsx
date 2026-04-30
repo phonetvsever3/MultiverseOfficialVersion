@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { useAds, useCreateAd } from "@/hooks/use-ads";
-import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2, Calendar, Clock, Link2, Timer, RefreshCw, Save, Rows3, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, MonitorPlay, MousePointerClick, Code, Eye, Trash2, Maximize2, Upload, ImageIcon, Film, X, Loader2, Calendar, Clock, Link2, Timer, RefreshCw, Save, Rows3, ToggleLeft, ToggleRight, Play } from "lucide-react";
+import { showTelegaioAd, isInsideTelegram, isTelegaioSdkLoaded } from "@/components/TelegaioAd";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -205,6 +206,7 @@ function TelegaioAdSettings() {
   const [rewardEnabled, setRewardEnabled] = useState(false);
   const [rewardToken, setRewardToken] = useState("");
   const [rewardAdBlockUuid, setRewardAdBlockUuid] = useState("");
+  const [testingAd, setTestingAd] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -247,82 +249,38 @@ function TelegaioAdSettings() {
         </div>
         <div>
           <h2 className="font-bold text-foreground">Telega.io Ad Settings</h2>
-          <p className="text-xs text-muted-foreground">Native Telegram ad network — banner on detail pages + optional fullscreen interstitial rotation</p>
+          <p className="text-xs text-muted-foreground">Telegram Mini App ad network — interstitial ads shown before Watch/Download.</p>
+        </div>
+      </div>
+
+      <div className="mb-5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200">
+        <div className="font-bold mb-1">⚠ Important: Telega.io ads only work inside Telegram.</div>
+        <div className="text-amber-100/80 space-y-2">
+          <p>
+            The InApp SDK requires <code className="font-mono">Telegram.WebApp.initData</code> to authenticate. When you open
+            the app URL in a regular browser (Chrome, Safari, etc.), no ad will load — that's expected. To verify ads work,
+            open your bot in Telegram and tap the <strong>menu button</strong> (squared icon at the bottom-left of the chat) to launch the mini app.
+          </p>
+          <p>
+            <strong>Diagnostic page:</strong> open <code className="font-mono">/diag</code> from inside Telegram (e.g.{" "}
+            <a
+              href="/diag"
+              target="_blank"
+              rel="noreferrer"
+              className="underline text-amber-50 hover:text-white"
+              data-testid="link-open-diag"
+            >
+              {window.location.origin}/diag
+            </a>
+            ) to see live initData status, SDK status, and a "Fire ad now" button.
+          </p>
         </div>
       </div>
 
       <div className="space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
-            <div>
-              <div className="text-sm font-medium text-foreground">Enable Banner</div>
-              <div className="text-xs text-muted-foreground">Show telega.io banner on movie &amp; series pages</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setEnabled(!enabled)}
-              className="transition-all active:scale-95"
-              data-testid="toggle-telegaio-enabled"
-            >
-              {enabled
-                ? <ToggleRight className="w-8 h-8 text-primary" />
-                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
-              }
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
-            <div>
-              <div className="text-sm font-medium text-foreground">Enable Fullscreen</div>
-              <div className="text-xs text-muted-foreground">Rotate telega.io 50/50 with Smart Link as fullscreen ad</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setFullscreenEnabled(!fullscreenEnabled)}
-              className="transition-all active:scale-95"
-              data-testid="toggle-telegaio-fullscreen-enabled"
-            >
-              {fullscreenEnabled
-                ? <ToggleRight className="w-8 h-8 text-primary" />
-                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
-              }
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground flex items-center gap-2">
-            <Code className="w-3.5 h-3.5 text-muted-foreground" /> Telega.io Embed Script
-          </label>
-          <Textarea
-            value={script}
-            onChange={(e) => setScript(e.target.value)}
-            placeholder={`<script src="https://telega.io/js/widget.js" data-id="YOUR_ID" async></script>`}
-            className="font-mono text-xs min-h-[100px] resize-none"
-          />
-          <p className="text-xs text-muted-foreground">Paste the full embed script from your telega.io dashboard. It runs inside a sandboxed iframe on movie/series pages.</p>
-        </div>
-
-        {/* Reward Ad (inapp SDK) */}
-        <div className="border border-border/60 rounded-xl p-4 space-y-4 bg-black/10">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-foreground">Reward Ad (inapp SDK)</div>
-              <div className="text-xs text-muted-foreground">Show a reward ad via telega.io inapp SDK before Watch / Download — rotates with Smart Link &amp; fullscreen</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setRewardEnabled(!rewardEnabled)}
-              className="transition-all active:scale-95"
-              data-testid="toggle-telegaio-reward-enabled"
-            >
-              {rewardEnabled
-                ? <ToggleRight className="w-8 h-8 text-primary" />
-                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
-              }
-            </button>
-          </div>
-
+        {/* SDK credentials — required for ALL telega.io ad formats */}
+        <div className="border border-primary/30 rounded-xl p-4 space-y-3 bg-primary/5">
+          <div className="text-sm font-semibold text-foreground">Telega.io Credentials (required)</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">App Token</label>
@@ -345,17 +303,116 @@ function TelegaioAdSettings() {
               />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">Find your token and ad block UUID in your telega.io dashboard → Mini App → Reward Ads.</p>
+          <p className="text-xs text-muted-foreground">Find both values in your telega.io dashboard → Mini App → Ad Blocks.</p>
         </div>
 
-        <Button
-          onClick={() => mutation.mutate()}
-          disabled={mutation.isPending}
-          className="gap-2"
-        >
-          {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          Save Telega.io Settings
-        </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
+            <div>
+              <div className="text-sm font-medium text-foreground">Fullscreen Interstitial</div>
+              <div className="text-xs text-muted-foreground">Rotate in the ad pool on Watch/Download</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFullscreenEnabled(!fullscreenEnabled)}
+              className="transition-all active:scale-95"
+              data-testid="toggle-telegaio-fullscreen-enabled"
+            >
+              {fullscreenEnabled
+                ? <ToggleRight className="w-8 h-8 text-primary" />
+                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+              }
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5">
+            <div>
+              <div className="text-sm font-medium text-foreground">Reward Ad</div>
+              <div className="text-xs text-muted-foreground">Same SDK call — adds another rotation slot</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRewardEnabled(!rewardEnabled)}
+              className="transition-all active:scale-95"
+              data-testid="toggle-telegaio-reward-enabled"
+            >
+              {rewardEnabled
+                ? <ToggleRight className="w-8 h-8 text-primary" />
+                : <ToggleLeft className="w-8 h-8 text-muted-foreground" />
+              }
+            </button>
+          </div>
+        </div>
+
+        <details className="rounded-xl border border-border/40 bg-black/10 p-3">
+          <summary className="text-xs text-muted-foreground cursor-pointer select-none">
+            Embed Script (legacy / unused — kept for backward compatibility)
+          </summary>
+          <div className="space-y-1.5 pt-3">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+              <Code className="w-3.5 h-3.5" /> Optional script
+            </label>
+            <Textarea
+              value={script}
+              onChange={(e) => setScript(e.target.value)}
+              placeholder={`<!-- Not used by mini-app ads — leave blank -->`}
+              className="font-mono text-xs min-h-[80px] resize-none"
+            />
+            <p className="text-xs text-muted-foreground">The InApp SDK is loaded automatically. Mini-app ads do not use embed scripts — only the App Token + Ad Block UUID above.</p>
+          </div>
+        </details>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            className="gap-2"
+          >
+            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Telega.io Settings
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testingAd || !rewardToken || !rewardAdBlockUuid}
+            onClick={async () => {
+              if (!rewardToken || !rewardAdBlockUuid) return;
+              const inTg = isInsideTelegram();
+              const sdkOk = isTelegaioSdkLoaded();
+              if (!sdkOk) {
+                toast({
+                  title: "SDK not loaded",
+                  description: "The Telega.io SDK script failed to load. Check your network/ad-blocker.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              if (!inTg) {
+                toast({
+                  title: "Open this in Telegram first",
+                  description: "Telega.io ads need Telegram.WebApp.initData to authenticate. They cannot fire from a regular browser.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              setTestingAd(true);
+              const ok = await showTelegaioAd(rewardToken, rewardAdBlockUuid);
+              setTestingAd(false);
+              toast({
+                title: ok ? "Ad fired successfully" : "No ad returned",
+                description: ok
+                  ? "The SDK call completed. If you didn't see anything visually, telega.io may not have an ad to serve right now."
+                  : "Open the browser console (long-press in Telegram Desktop \u2192 Inspect) for the [telega.io] error logs.",
+                variant: ok ? "default" : "destructive",
+              });
+            }}
+            className="gap-2"
+            data-testid="button-test-telegaio-ad"
+          >
+            {testingAd ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            Test Telega.io Ad
+          </Button>
+        </div>
       </div>
     </div>
   );

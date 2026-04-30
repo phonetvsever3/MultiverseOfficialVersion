@@ -38,6 +38,7 @@ import Adult from "@/pages/app/Adult";
 import Football from "@/pages/app/Football";
 import Support from "@/pages/app/Support";
 import Stream from "@/pages/app/Stream";
+import DiagPage from "@/pages/app/Diag";
 
 function useAuth() {
   return useQuery({
@@ -112,6 +113,10 @@ function Router() {
       <Route path="/app/support" component={Support} />
       <Route path="/app/stream/movie/:id" component={Stream} />
       <Route path="/app/stream/episode/:id" component={Stream} />
+
+      {/* Public diagnostics page (no auth) — to test telega.io inside Telegram */}
+      <Route path="/diag" component={DiagPage} />
+      <Route path="/app/diag" component={DiagPage} />
 
       {/* Redirect root to admin */}
       <Route path="/">{() => <ProtectedRoute component={AdminDashboard} />}</Route>
