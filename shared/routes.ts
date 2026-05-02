@@ -120,7 +120,14 @@ export const api = {
       responses: {
         200: z.object({ success: z.boolean() }),
       },
-    }
+    },
+    click: {
+      method: 'POST' as const,
+      path: '/api/ads/:id/click',
+      responses: {
+        200: z.object({ success: z.boolean() }),
+      },
+    },
   },
   stats: {
     dashboard: {
@@ -133,6 +140,7 @@ export const api = {
           totalSeries: z.number(),
           totalViews: z.number(),
           activeAds: z.number(),
+          totalAdClicks: z.number(),
         }),
       },
     },

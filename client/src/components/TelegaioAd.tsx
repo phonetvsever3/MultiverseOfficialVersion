@@ -1,32 +1,40 @@
-import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Timer } from "lucide-react";
-import { useState } from "react";
-
-interface TelegaioAdBannerProps {
-  script: string;
-  className?: string;
-}
+import { useState, useEffect, useRef } from "react";
 
 /**
- * Renders a telega.io banner ad by injecting the admin-configured script
- * into a sandboxed iframe. Place on Movie/Series detail pages.
+ * Self-contained inline 320×50 banner ad.
+ * Fetches the working /api/public/banner-ad config and renders it in a
+ * sandboxed iframe. Replaces the old Telega.io script approach — the
+ * Telega.io Mini App SDK only supports fullscreen reward ads (ad_show),
+ * not inline banners.
  */
-export function TelegaioAdBanner({ script, className = "" }: TelegaioAdBannerProps) {
-  if (!script) return null;
+export function TelegaioAdBanner({ className = "" }: { className?: string }) {
+  const { data } = useQuery<{ code: string; enabled: boolean }>({
+    queryKey: ["/api/public/banner-ad"],
+    staleTime: 60000,
+  });
 
-  const srcDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box;overflow:hidden}body{background:transparent;display:flex;align-items:center;justify-content:center;width:100%;height:100%}</style></head><body>${script}</body></html>`;
+  if (!data?.enabled || !data?.code) return null;
 
   return (
-    <div className={`w-full flex justify-center ${className}`}>
-      <iframe
-        srcDoc={srcDoc}
-        className="w-full border-0"
-        style={{ height: "60px", maxWidth: "360px" }}
-        title="Sponsored"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"
-        scrolling="no"
-      />
+    <div className={`flex justify-center ${className}`}>
+      <div
+        className="overflow-hidden rounded-lg"
+        style={{ width: "320px", height: "50px", background: "transparent" }}
+        data-testid="telegaio-banner-ad"
+      >
+        <iframe
+          srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;overflow:hidden}</style></head><body>${data.code}</body></html>`}
+          width="320"
+          height="50"
+          className="border-0"
+          title="Advertisement"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox"
+          scrolling="no"
+        />
+      </div>
     </div>
   );
 }

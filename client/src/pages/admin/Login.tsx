@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Lock, User } from "lucide-react";
+import { queryClient } from "@/lib/queryClient";
 
 interface LoginForm {
   username: string;
@@ -34,6 +35,7 @@ export default function LoginPage() {
       });
       const json = await res.json();
       if (res.ok && json.success) {
+        await queryClient.invalidateQueries({ queryKey: ["/api/admin/auth/me"] });
         navigate("/admin");
       } else {
         setError(json.message || "Invalid username or password");

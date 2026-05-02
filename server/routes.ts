@@ -171,6 +171,7 @@ export async function registerRoutes(
 
   app.get(api.movies.get.path, async (req, res) => {
     const id = Number(req.params.id);
+    if (!id || isNaN(id)) return res.status(400).json({ message: "Invalid movie id" });
     const cacheKey = `movie:${id}`;
     const hit = getCached(cacheKey);
     if (hit) {
@@ -768,6 +769,11 @@ export async function registerRoutes(
 
   app.post(api.ads.impression.path, async (req, res) => {
     await storage.incrementAdImpressions(Number(req.params.id));
+    res.json({ success: true });
+  });
+
+  app.post(api.ads.click.path, async (req, res) => {
+    await storage.incrementAdClicks(Number(req.params.id));
     res.json({ success: true });
   });
 

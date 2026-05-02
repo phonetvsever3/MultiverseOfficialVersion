@@ -10,6 +10,7 @@ import {
 import { FullScreenInterstitialAd } from "@/components/FullScreenInterstitialAd";
 import { VideoPlayer, type VideoSource } from "@/components/VideoPlayer";
 import { AdRenderer } from "@/components/AdRenderer";
+import { TelegaioAdBanner } from "@/components/TelegaioAd";
 import { type Ad } from "@shared/schema";
 
 const tg = (window as any).Telegram?.WebApp;
@@ -395,6 +396,7 @@ export default function Adult() {
     7: bannerAd3,
   };
 
+
   // Search results (only shown when searchMode=true)
   const { data: searchData, isLoading: isSearchLoading, isFetching: isSearchFetching } = useQuery<XnxxResponse>({
     queryKey: ["/api/adult/search", search, searchPage],
@@ -530,6 +532,11 @@ export default function Adult() {
 
       {/* Body */}
       <div className="pt-[112px]">
+
+        {/* Banner Ad */}
+        <div className="px-4 pt-2 pb-1" data-testid="telegaio-banner-ad-adult">
+          <TelegaioAdBanner />
+        </div>
 
         {/* VPN Banner */}
         <AnimatePresence>

@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { StatsCard } from "@/components/StatsCard";
 import { useDashboardStats } from "@/hooks/use-stats";
-import { Users, Film, Eye, MonitorPlay, BarChart2, Link2, AlertTriangle, ChevronRight } from "lucide-react";
+import { Users, Film, Eye, MonitorPlay, BarChart2, Link2, AlertTriangle, ChevronRight, MousePointerClick } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 
@@ -105,7 +105,7 @@ export default function AdminDashboard() {
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
           <StatsCard
             title="Total Users"
             value={stats?.totalUsers || 0}
@@ -125,6 +125,11 @@ export default function AdminDashboard() {
             title="Active Ads"
             value={stats?.activeAds || 0}
             icon={<MonitorPlay className="w-5 h-5" />}
+          />
+          <StatsCard
+            title="Ad Clicks"
+            value={stats?.totalAdClicks?.toLocaleString() || 0}
+            icon={<MousePointerClick className="w-5 h-5" />}
           />
         </div>
 

@@ -9,6 +9,7 @@ import {
   RotateCw,
 } from "lucide-react";
 import { AdRenderer } from "@/components/AdRenderer";
+import { TelegaioAdBanner } from "@/components/TelegaioAd";
 import { type Ad } from "@shared/schema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -532,6 +533,7 @@ export default function Football() {
     retry: false,
   });
 
+
   // Fetch a banner ad for the match list
   const { data: listBannerAd } = useQuery<Ad | null>({
     queryKey: ["/api/ads/serve", "football-list"],
@@ -645,6 +647,11 @@ export default function Football() {
 
       {/* Body */}
       <div className="pt-[124px] px-4">
+        {/* Banner Ad */}
+        <div className="pt-2 pb-1" data-testid="telegaio-banner-ad-football">
+          <TelegaioAdBanner />
+        </div>
+
         {isLoading ? (
           <div className="space-y-3 mt-2">
             {Array.from({ length: 6 }).map((_, i) => (

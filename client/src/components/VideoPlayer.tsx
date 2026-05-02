@@ -194,7 +194,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     fetch("/api/ads/serve")
       .then(r => r.json())
       .then((ad: Ad | null) => {
-        if (!ad) { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); return; }
+        if (!ad || !ad.content?.trim()) { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); return; }
         setAdData(ad);
         setAdCountdown(10);
         setAdSkippable(false);
@@ -232,7 +232,7 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     fetch("/api/ads/serve")
       .then(r => r.json())
       .then((ad: Ad | null) => {
-        if (!ad) { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); return; }
+        if (!ad || !ad.content?.trim()) { const p2 = playerRef.current; if (p2 && !p2.isDisposed()) p2.play(); return; }
         setPrerollData(ad);
         setPrerollCountdown(15);
         setPrerollSkippable(false);
@@ -447,6 +447,8 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
 
   // Fullscreen change & orientation detection
   useEffect(() => {
+    const tg = (window as any).Telegram?.WebApp;
+
     const onFs = () => {
       const isFs = !!(document.fullscreenElement ||
         (document as any).webkitFullscreenElement ||
@@ -457,6 +459,18 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
     document.addEventListener("webkitfullscreenchange", onFs);
     document.addEventListener("mozfullscreenchange", onFs);
 
+    // Telegram WebApp fullscreen events (no DOM fullscreenchange fires in TG)
+    const onTgFsChanged = (params: { is_fullscreen: boolean }) => {
+      setFullscreen(!!params?.is_fullscreen);
+    };
+    if (tg?.onEvent) {
+      tg.onEvent("fullscreenChanged", onTgFsChanged);
+    }
+    // Sync initial Telegram fullscreen state
+    if (tg?.isFullscreen !== undefined) {
+      setFullscreen(!!tg.isFullscreen);
+    }
+
     const mq = window.matchMedia("(orientation: portrait)");
     const onOrient = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
     setIsPortrait(mq.matches);
@@ -466,6 +480,9 @@ export function VideoPlayer({ sources, poster, title, onClose, showMidrollAd = f
       document.removeEventListener("fullscreenchange", onFs);
       document.removeEventListener("webkitfullscreenchange", onFs);
       document.removeEventListener("mozfullscreenchange", onFs);
+      if (tg?.offEvent) {
+        tg.offEvent("fullscreenChanged", onTgFsChanged);
+      }
       mq.removeEventListener("change", onOrient);
     };
   }, []);

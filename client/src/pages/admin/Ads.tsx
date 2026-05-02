@@ -808,7 +808,7 @@ export default function AdminAds() {
                       <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
                          <MousePointerClick className="w-3 h-3" /> Clicks
                       </div>
-                      <div className="font-bold">-</div>
+                      <div className="font-bold">{ad.clickCount || 0}</div>
                    </div>
                    <div className="text-center border-l border-border">
                       <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">

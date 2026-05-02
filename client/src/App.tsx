@@ -39,6 +39,40 @@ import Football from "@/pages/app/Football";
 import Support from "@/pages/app/Support";
 import Stream from "@/pages/app/Stream";
 
+// ── Global Telega.io SDK loader ───────────────────────────────────────────────
+// Injects the SDK into the MAIN window at app startup so window.TelegaIn is
+// ready long before the user taps Watch/Download on any movie page.
+// The banner iframe has its own isolated copy of the SDK — that copy cannot
+// call Telegram's native UI. This one in the main window can.
+function TelegaioSdkLoader() {
+  const { data: config } = useQuery<{ rewardToken?: string; enabled?: boolean }>({
+    queryKey: ["/api/public/telegaio-ad"],
+    staleTime: 60000,
+  });
+
+  useEffect(() => {
+    if (!config?.rewardToken || !config?.enabled) return;
+    if ((window as any).__telegaInSdkLoading || (window as any).__telegaInSdkLoaded) return;
+    (window as any).__telegaInSdkLoading = true;
+
+    const script = document.createElement("script");
+    script.src = "https://inapp.telega.io/sdk/v1/sdk.js";
+    script.async = true;
+    script.onload = () => {
+      (window as any).__telegaInSdkLoaded = true;
+      const TelegaIn = (window as any).TelegaIn;
+      if (TelegaIn?.AdsController && !(window as any).__telegaInAds) {
+        (window as any).__telegaInAds = TelegaIn.AdsController.create_miniapp({
+          token: config.rewardToken,
+        });
+      }
+    };
+    document.head.appendChild(script);
+  }, [config?.rewardToken, config?.enabled]);
+
+  return null;
+}
+
 function useAuth() {
   return useQuery({
     queryKey: ["/api/admin/auth/me"],
@@ -125,6 +159,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <TelegaioSdkLoader />
         <Toaster />
         <Router />
       </TooltipProvider>

@@ -3,11 +3,12 @@ import { useRoute, useLocation } from "wouter";
 import { useMovie } from "@/hooks/use-movies";
 import { Calendar, Star, Film, Download, Tv, Play, ChevronLeft, User, Sparkles, ArrowRight, X, Database, Shield, Heart } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { type Episode, type Movie } from "@shared/schema";
+import { type Episode, type Movie, type Ad } from "@shared/schema";
 import { addToWatchHistory } from "@/lib/watch-history";
 import { isInWatchlist, toggleWatchlist } from "@/lib/watchlist";
 import { SmartLinkAdBox } from "@/components/SmartLinkAdBox";
-import { TelegaioAdBanner, TelegaioFullscreenAd } from "@/components/TelegaioAd";
+import { TelegaioAdBanner } from "@/components/TelegaioAd";
+import { FullscreenInterstitialAd } from "@/components/FullscreenInterstitialAd";
 import { motion } from "framer-motion";
 
 const tg = (window as any).Telegram?.WebApp;
@@ -55,6 +56,7 @@ export default function MovieView() {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [showTrailer, setShowTrailer] = useState(false);
   const [adBox, setAdBox] = useState<{ mode: "watch" | "download"; action: () => void } | null>(null);
+  const [fsAdBox, setFsAdBox] = useState<{ mode: "watch" | "download"; action: () => void } | null>(null);
   const [favorited, setFavorited] = useState(() => isInWatchlist(movieId));
 
   const { data: trailer } = useQuery<TrailerInfo | null>({
@@ -67,16 +69,15 @@ export default function MovieView() {
     staleTime: 60000,
   });
 
-  const { data: bannerAdConfig } = useQuery<{ code: string; enabled: boolean }>({
-    queryKey: ["/api/public/banner-ad"],
-    staleTime: 60000,
-  });
-
-  const { data: telegaioConfig } = useQuery<{ script: string; enabled: boolean; fullscreenEnabled: boolean; rewardEnabled: boolean; rewardToken: string; rewardAdBlockUuid: string }>({
+  const { data: telegaioConfig } = useQuery<{ rewardToken: string; rewardAdBlockUuid: string; rewardEnabled: boolean }>({
     queryKey: ["/api/public/telegaio-ad"],
     staleTime: 60000,
   });
-  const [showTelegaioFs, setShowTelegaioFs] = useState(false);
+
+  const { data: fullscreenAd } = useQuery<Ad | null>({
+    queryKey: ["/api/ads/fullscreen"],
+    staleTime: 60000,
+  });
 
   const { data: episodes } = useQuery<Episode[]>({
     queryKey: [`/api/movies/${movieId}/episodes`],
@@ -109,15 +110,20 @@ export default function MovieView() {
 
   const showRewardAd = useCallback(async (token: string, adBlockUuid: string, callback: () => void) => {
     try {
+      // Wait up to 5 s for SDK to be ready
+      let waited = 0;
+      while (!(window as any).TelegaIn?.AdsController && waited < 5000) {
+        await new Promise((r) => setTimeout(r, 150));
+        waited += 150;
+      }
       const TelegaIn = (window as any).TelegaIn;
       if (!TelegaIn?.AdsController) { callback(); return; }
-      if (!(window as any).__telegaInAds) {
-        (window as any).__telegaInAds = TelegaIn.AdsController.create_miniapp({ token });
-      }
-      const ads = (window as any).__telegaInAds;
-      await ads.ad_show({ adBlockUuid });
+
+      // Always recreate controller with the current token
+      (window as any).__telegaInAds = TelegaIn.AdsController.create_miniapp({ token });
+      await (window as any).__telegaInAds.ad_show({ adBlockUuid });
     } catch {
-      // If ad fails or is skipped, still proceed
+      // No fill or SDK error — proceed silently
     } finally {
       callback();
     }
@@ -125,36 +131,40 @@ export default function MovieView() {
 
   const triggerAction = useCallback((mode: "watch" | "download", action: () => void) => {
     const config = smartLinkConfig || { url: "", countdown: 5, interval: 0 };
-    const hasTelegaioFs = telegaioConfig?.fullscreenEnabled && !!telegaioConfig?.script;
     const hasSmartLink = shouldShowAd(config);
-    const hasReward = !!(telegaioConfig?.rewardEnabled && telegaioConfig?.rewardToken && telegaioConfig?.rewardAdBlockUuid);
+    const hasFullscreen = !!fullscreenAd;
+    const hasTelegaio = !!(telegaioConfig?.rewardEnabled && telegaioConfig?.rewardToken && telegaioConfig?.rewardAdBlockUuid);
 
-    // Build the pool of available ad slots
-    const pool: Array<"smartlink" | "telegaio_fs" | "reward"> = [];
+    // Build pool — each enabled source gets one slot
+    const pool: Array<"smartlink" | "fullscreen" | "telegaio"> = [];
     if (hasSmartLink) pool.push("smartlink");
-    if (hasTelegaioFs) pool.push("telegaio_fs");
-    if (hasReward) pool.push("reward");
+    if (hasFullscreen) pool.push("fullscreen");
+    if (hasTelegaio) pool.push("telegaio");
 
     if (pool.length === 0) { action(); return; }
 
-    // Pick randomly from pool
     const picked = pool[Math.floor(Math.random() * pool.length)];
 
-    if (picked === "smartlink") {
-      setAdBox({ mode, action });
-    } else if (picked === "telegaio_fs") {
-      setShowTelegaioFs(true);
-      (window as any).__telegaioAdAction = action;
-    } else {
-      // Reward ad — async, proceed after completion
+    if (picked === "telegaio") {
       showRewardAd(telegaioConfig!.rewardToken, telegaioConfig!.rewardAdBlockUuid, action);
+    } else if (picked === "fullscreen") {
+      fetch(`/api/ads/${fullscreenAd!.id}/impression`, { method: "POST" }).catch(() => {});
+      setFsAdBox({ mode, action });
+    } else {
+      setAdBox({ mode, action });
     }
-  }, [smartLinkConfig, telegaioConfig, showRewardAd]);
+  }, [smartLinkConfig, fullscreenAd, telegaioConfig, showRewardAd]);
 
   const handleAdProceed = () => {
     recordAdSeen();
     const action = adBox?.action;
     setAdBox(null);
+    setTimeout(() => action?.(), 50);
+  };
+
+  const handleFsAdProceed = () => {
+    const action = fsAdBox?.action;
+    setFsAdBox(null);
     setTimeout(() => action?.(), 50);
   };
 
@@ -326,33 +336,10 @@ export default function MovieView() {
         </motion.button>
       </div>
 
-      {/* ── 320x50 Banner Ad (above Watch Now) ── */}
-      {bannerAdConfig?.enabled && bannerAdConfig?.code && (
-        <div className="flex justify-center px-5 pt-4">
-          <div
-            className="overflow-hidden rounded-lg"
-            style={{ width: "320px", height: "50px", background: "transparent" }}
-            data-testid="banner-ad"
-          >
-            <iframe
-              srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;overflow:hidden}</style></head><body>${bannerAdConfig.code}</body></html>`}
-              width="320"
-              height="50"
-              className="border-0"
-              title="Advertisement"
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox"
-              scrolling="no"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* ── Telega.io Banner Ad ── */}
-      {telegaioConfig?.enabled && telegaioConfig?.script && (
-        <div className="px-5 pt-4" data-testid="telegaio-banner-ad">
-          <TelegaioAdBanner script={telegaioConfig.script} />
-        </div>
-      )}
+      {/* ── Banner Ad ── */}
+      <div className="px-5 pt-4" data-testid="banner-ad">
+        <TelegaioAdBanner />
+      </div>
 
       {/* ── Action Buttons for Movies ── */}
       {movie.type === "movie" && (
@@ -645,20 +632,16 @@ export default function MovieView() {
         />
       )}
 
-      {/* ── Telega.io Fullscreen Interstitial ── */}
-      {showTelegaioFs && telegaioConfig?.script && (
-        <TelegaioFullscreenAd
-          script={telegaioConfig.script}
-          onClose={() => {
-            setShowTelegaioFs(false);
-            const pendingAction = (window as any).__telegaioAdAction;
-            if (pendingAction) {
-              (window as any).__telegaioAdAction = null;
-              setTimeout(pendingAction, 50);
-            }
-          }}
+      {/* ── Fullscreen Interstitial Ad ── */}
+      {fsAdBox && fullscreenAd && (
+        <FullscreenInterstitialAd
+          ad={fullscreenAd}
+          mode={fsAdBox.mode}
+          countdown={5}
+          onProceed={handleFsAdProceed}
         />
       )}
+
     </div>
   );
 }

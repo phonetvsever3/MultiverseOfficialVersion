@@ -100,6 +100,7 @@ export const ads = pgTable("ads", {
   isActive: boolean("is_active").default(true),
   weight: integer("weight").default(1),
   impressionCount: integer("impression_count").default(0),
+  clickCount: integer("click_count").default(0),
   // Fullscreen interstitial ad fields
   imageUrl: text("image_url"),
   videoUrl: text("video_url"),

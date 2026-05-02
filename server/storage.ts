@@ -64,6 +64,7 @@ export interface IStorage {
   getRandomAd(): Promise<Ad | undefined>;
   getRandomFullscreenAd(): Promise<Ad | undefined>;
   incrementAdImpressions(id: number): Promise<void>;
+  incrementAdClicks(id: number): Promise<void>;
   deleteAd(id: number): Promise<void>;
 
   // Users
@@ -78,7 +79,7 @@ export interface IStorage {
   updateSettings(settings: Partial<Settings>): Promise<Settings>;
 
   // Dashboard Stats
-  getDashboardStats(): Promise<{ totalMovies: number, totalSeries: number, totalViews: number, activeAds: number, totalUsers: number }>;
+  getDashboardStats(): Promise<{ totalMovies: number, totalSeries: number, totalViews: number, activeAds: number, totalUsers: number, totalAdClicks: number }>;
   getTopRatedMovies(limit: number): Promise<Movie[]>;
 
   // Backups
@@ -475,7 +476,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUsers(): Promise<any[]> {
-    return await db.select().from(users);
+    return await db.select().from(users).orderBy(desc(users.joinedAt));
   }
 
   async createAd(ad: InsertAd): Promise<Ad> {
@@ -508,6 +509,12 @@ export class DatabaseStorage implements IStorage {
   async incrementAdImpressions(id: number): Promise<void> {
     await db.update(ads)
       .set({ impressionCount: sql`${ads.impressionCount} + 1` })
+      .where(eq(ads.id, id));
+  }
+
+  async incrementAdClicks(id: number): Promise<void> {
+    await db.update(ads)
+      .set({ clickCount: sql`${ads.clickCount} + 1` })
       .where(eq(ads.id, id));
   }
 
@@ -568,12 +575,14 @@ export class DatabaseStorage implements IStorage {
       [viewsCount],
       [adsCount],
       [usersCount],
+      [clicksSum],
     ] = await Promise.all([
       db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'movie')),
       db.select({ count: sql<number>`count(*)` }).from(movies).where(eq(movies.type, 'series')),
       db.select({ sum: sql<number>`sum(${movies.views})` }).from(movies),
       db.select({ count: sql<number>`count(*)` }).from(ads).where(eq(ads.isActive, true)),
       db.select({ count: sql<number>`count(*)` }).from(users),
+      db.select({ sum: sql<number>`sum(${ads.clickCount})` }).from(ads),
     ]);
 
     return {
@@ -582,6 +591,7 @@ export class DatabaseStorage implements IStorage {
       totalViews: Number(viewsCount?.sum || 0),
       activeAds: Number(adsCount?.count || 0),
       totalUsers: Number(usersCount?.count || 0),
+      totalAdClicks: Number(clicksSum?.sum || 0),
     };
   }
 
